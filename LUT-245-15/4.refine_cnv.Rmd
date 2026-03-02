@@ -1,0 +1,101 @@
+---
+title: "CNV refinition and differential expression between tumour and non-tumour"
+output: html_document
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r set up}
+library(Seurat)
+library(qs, "~/R_Library/4.5")
+library(fastCNV)
+source("~/VisHD/functions.R")
+library(fastCNV)
+library(clusterProfiler)
+library(dplyr)
+library(patchwork)
+library(ggplot2)
+library(pals)
+arg = 3
+
+
+# 4. Define file paths
+# Finds all directories matching 'LUT-*' to create a list of samples.
+paths <- system("realpath ~/VisHD/LUT-*/", intern = T)
+
+# Select the specific sample directory based on the command line argument
+path <- paths[arg]
+setwd(path)
+
+```
+
+```{r}
+
+srt_cell <- qread("banksy_srt.qs")
+DefaultAssay(srt_cell) <- "SpaNorm"
+
+CB <- read.csv("CB.csv", sep = "\t")
+srt_cell$category <- NA
+srt_cell$category <- paste("CB", CB$CB[match(srt_cell$cell, CB$cellid)])
+srt_cell$category[srt_cell$category == "CB NA"] <- "DT"
+# g <- ImageDimPlot(srt_cell, group.by = "category")
+# cells <- CellSelector(g)
+# cells <- g@data$cell[as.numeric(cells)]
+# cells <- sapply(strsplit(cells, split = "_"), '[', 2)
+# CB <- data.frame(CB = "1", cellid = cells)
+# write.table(CB, "CB.csv", quote = F, sep = "\t", col.names = T, row.names = F)
+
+ImageDimPlot(srt_cell, group.by = "category")
+srt_bin <- qread("bined_ouput/srt_fastCNV.qs")
+
+srt_cell <- transfer_visiumhd_to_cells(
+  srt_cell,
+  srt_bin,
+  annotation_cols = c("cnv_clusters", "cnv_fraction")
+)
+```
+
+```{r}
+SpatialDimPlot(srt_bin, group.by = "cnv_clusters")
+ImageDimPlot(srt_cell, group.by = "cnv_clusters", cols = "polychrome")+ImageFeaturePlot(srt_cell, "cnv_fraction")
+ImageDimPlot(srt_cell, group.by = "cnv_clusters", cols = "polychrome", split.by = "category")
+VlnPlot(srt_cell, group.by = "BANKSY_0.2_snn_res.1", "cnv_fraction")+VlnPlot(srt_cell, group.by = "cnv_clusters", "cnv_fraction")+ plot_layout(ncol = 2)
+
+```
+```{r}
+df <- FetchData(srt_cell, c("BANKSY_0.2_snn_res.1", "cnv_clusters", "cnv_fraction", "category"))
+df <- df %>% group_by(category,BANKSY_0.2_snn_res.1, cnv_clusters) %>% summarise(n = n(), avg_cnv = mean(cnv_fraction))
+
+ggplot(df, aes(x = BANKSY_0.2_snn_res.1, y = n,  fill = as.factor(cnv_clusters))) +
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = as.character(polychrome(12))) +
+  #scale_fill_gradient(high =  "#B2182B", low = "#92C5DE" )+
+  theme_classic()+
+  #geom_text(aes(label = avg_cnv, group = category), position = position_stack(vjust = 0.5),color = "white")+ # Centers labels inside
+  facet_grid(.~category, space = "free", scales = "free")
+```
+
+```{r}
+ImageDimPlot(srt_cell, group.by = "cnv_clusters", cols = "polychrome")
+ImageDimPlot(srt_cell, group.by = "BANKSY_0.2_snn_res.1", cols = "polychrome")
+ImageDimPlot(srt_cell, group.by = "cnv_clusters", cols = "polychrome", split.by = "BANKSY_0.2_snn_res.1")
+```
+```{r}
+tree_data <- CNVTree(srt_bin, values ="calls", cnv_thresh = 0.01, healthyClusters = "2")
+```
+
+```{r}
+srt_cell$tumour_anno <- ifelse(srt_cell$cnv_clusters %in% c("1", "2"), "NoTumour", "Tumour")
+srt_cell$tumour_fullanno <- paste(srt_cell$category, srt_cell$tumour_anno)
+
+ImageDimPlot(srt_cell, group.by = "tumour_anno", cols = c(  "#E64B35","#4DBBD5"))
+ImageDimPlot(srt_cell, group.by = "tumour_fullanno", cols = c("#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4", "#91D1C2", "#DC0000", "#7E6148", "#B09C85"))
+table(srt_cell$tumour_fullanno)
+```
+
+```{r}
+saveRDS(srt_cell@meta.data, "tumour_anno.Rds")
+```
+

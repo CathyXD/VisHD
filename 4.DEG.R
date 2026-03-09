@@ -48,18 +48,12 @@ geneList <- DEG %>% filter(p_val_adj <0.05) %>%  arrange(desc(avg_log2FC)) %>% s
 geneList <- setNames(geneList$avg_log2FC, rownames(geneList))
 enrichlist <- lapply(list(Hall, C6, C5),function(geneset){
   enrich <- clusterProfiler::GSEA(geneList, TERM2GENE = geneset)
-  ridgeplot(gsea_result, showCategory = 20, fill = "p.adjust") +
-    scale_fill_gradient(low = "#d73027", high = "#4575b4") +
-    ggtitle("GSEA Ridge Plot") +
-    theme_bw(base_size = 12) +
-    theme(
-      plot.title  = element_text(hjust = 0.5, face = "bold"),
-      axis.text.y = element_text(size = 9)
-    )
   pathwayenrich_plot(top_n = 8, gsea_result = enrich, save.path = "png/tumourvsnontumour_")
   return(enrich)
 } )
 saveRDS(enrichlist, "enrichlist_tumourvsnontumour.Rds")
+
+cat("Tumour vs non tumour DONE\n")
 
 # Tumour vs non Tumour differential expression analysis==========
 deglist <- list()
@@ -71,16 +65,8 @@ for(cb in grep(" Tumour", fixed = T, value = T, grep("CB", value = T, unique(srt
   geneList <- setNames(geneList$avg_log2FC, rownames(geneList))
   enrichlist <- lapply(list(Hall, C6,C5),function(geneset){
     enrich <- clusterProfiler::GSEA(geneList, TERM2GENE = geneset)
-    ridgeplot(gsea_result, showCategory = 20, fill = "p.adjust") +
-      scale_fill_gradient(low = "#d73027", high = "#4575b4") +
-      ggtitle("GSEA Ridge Plot") +
-      theme_bw(base_size = 12) +
-      theme(
-        plot.title  = element_text(hjust = 0.5, face = "bold"),
-        axis.text.y = element_text(size = 9)
-      )
-    return(enrich)
     pathwayenrich_plot(top_n = 8, gsea_result = enrich, save.path = paste0("png/DTvs", cb))
+    return(enrich)
   } )
   enrichlist_list[[paste0("DTvs", cb)]] <- enrichlist
   deglist[[paste0("DTvs", cb)]] <- DEG %>% filter(p_val_adj <0.05)
@@ -88,4 +74,5 @@ for(cb in grep(" Tumour", fixed = T, value = T, grep("CB", value = T, unique(srt
 
 deglist <- data.table::rbindlist(deglist, fill = T, idcol = "comp")
 saveRDS(deglist, "deg_DTvsCBtumour.Rds")
-saveRDS(deglist, "deg_DTvsCBtumour.Rds")
+saveRDS(enrichlist_list, "enrichlist_DTvsCBtumour.Rds")
+cat("Tumour vs non tumour DONE\n")

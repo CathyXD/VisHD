@@ -3,13 +3,13 @@
 #SBATCH --account=pawsey1172
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=3
-#SBATCH --mem=150G
-#SBATCH --time=01:40:00
-#SBATCH --job-name=Infercnv2
-#SBATCH --array=2-4
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=100G
+#SBATCH --time=10:40:00
+#SBATCH --job-name=DEG
+#SBATCH --array=1-4
 #SBATCH --partition=work
-#SBATCH --output="slurmout/3.pseudobulk_infercnv-%j-%a.out"
+#SBATCH --output="slurmout/4.DEG-%j-%a.out"
 
 dir="${MYSCRATCH}"
 libpath="/scratch/pawsey1172/sweng/R_Library/4.5"
@@ -38,4 +38,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/3.pseudobulk_infercnv.R "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/4.DEG.R "$SLURM_ARRAY_TASK_ID"

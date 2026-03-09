@@ -325,12 +325,7 @@ transfer_visiumhd_to_cells <- function(
   srt_cell
 }
 
-return_genesetname <- function(id){
-  test <- unique(sapply(strsplit(id, split = "_"), '[', 1))
-  if (test %in% unique(sapply(strsplit(Hall$gs_name, split = "_"), '[', 1))) return("Hall")
-  if (test %in% unique(sapply(strsplit(C6$gs_name, split = "_"), '[', 1))) return("C6")
-  if (test %in% unique(sapply(strsplit(C5$gs_name, split = "_"), '[', 1))) return("C5")    
-}
+
 
 
 pathwayenrich_plot <- function(top_n, gsea_result, pvalue_show= F, plot = c("enrich", "network")[1], save.path = NULL){
@@ -377,11 +372,319 @@ pathwayenrich_plot <- function(top_n, gsea_result, pvalue_show= F, plot = c("enr
     
     print(p)
   }
-  
+  .return_genesetname <- function(id){
+    test <- unique(sapply(strsplit(id, split = "_"), '[', 1))
+    if (test %in% unique(sapply(strsplit(Hall$gs_name, split = "_"), '[', 1))) return("Hall")
+    if (test %in% unique(sapply(strsplit(C6$gs_name, split = "_"), '[', 1))) return("C6")
+    if (test %in% unique(sapply(strsplit(C5$gs_name, split = "_"), '[', 1))) return("C5")    
+  }
   if(!is.null(save.path)){
-    name = paste0(save.path, return_genesetname(top5_pathways), ".pdf")
+    name = paste0(save.path, .return_genesetname(top5_pathways), ".pdf")
     ggsave(name, width = 8, height = 8, plot = p)
   }
 }
 
+binarise_expression <- function(expr,
+                                ref_cells  = NULL,
+                                z_thresh   = 2,
+                                min_expr   = 0,
+                                plot_out   = NULL,
+                                verbose    = TRUE) {
+  require(mclust)
+  stopifnot(is.numeric(expr), length(expr) > 0)
+  
+  gene_name <- if (!is.null(names(expr))) "gene" else "gene"
+  
+  # ── 1. log1p-transform for modelling ─────────────────────
+  log_expr <- log1p(expr)
+  
+  # non-zero values only (zero-inflation is handled separately)
+  nz_idx   <- expr > min_expr
+  nz_log   <- log_expr[nz_idx]
+  
+  if (sum(nz_idx) < 10) {
+    warning("Fewer than 10 non-zero cells – returning all zeros.")
+    return(setNames(integer(length(expr)), names(expr)))
+  }
+  
+  # ── 2. Characterise the background (low) component ───────
+  
+  if (!is.null(ref_cells)) {
+    
+    # --- Reference cluster supplied ---
+    if (is.null(names(expr))) {
+      stop("`expr` must be a *named* vector when `ref_cells` is provided.")
+    }
+    ref_in_data <- ref_cells[ref_cells %in% names(expr)]
+    if (length(ref_in_data) == 0) {
+      stop("None of the supplied `ref_cells` match names in `expr`.")
+    }
+    
+    ref_log  <- log_expr[ref_in_data]
+    ref_log  <- ref_log[ref_log > log1p(min_expr)]   # non-zero only
+    
+    if (length(ref_log) < 5) {
+      warning("Fewer than 5 non-zero reference cells – falling back to mixture model.")
+      ref_cells <- NULL   # trigger mixture model below
+    } else {
+      mu_low    <- mean(ref_log)
+      sd_low    <- sd(ref_log)
+      method    <- "reference_cluster"
+      mc        <- NULL
+    }
+  }
+  
+  if (is.null(ref_cells)) {
+    
+    # --- Gaussian mixture model on non-zero log-values ---
+    # mclust "V" = unequal variances; try 1 or 2 components
+    mc <- tryCatch(
+      mclust::Mclust(nz_log, G = 1:2, model = "V", verbose = FALSE),
+      error = function(e) NULL
+    )
+    
+    if (is.null(mc) || mc$G == 1) {
+      # Only one component found → use mean/sd of all non-zero values
+      # and shift threshold based on skewness
+      mu_low  <- mean(nz_log)
+      sd_low  <- sd(nz_log)
+      method  <- "single_component"
+      message("Note: Only one mixture component detected. ",
+              "Threshold set at mean + ", z_thresh, " * SD of non-zero values.")
+    } else {
+      # Take the lower-mean component as "background"
+      low_comp <- which.min(mc$parameters$mean)
+      mu_low   <- mc$parameters$mean[low_comp]
+      sd_low   <- sqrt(mc$parameters$variance$sigmasq[
+        min(low_comp, length(mc$parameters$variance$sigmasq))
+      ])
+      method   <- "mixture_model"
+    }
+  }
+  
+  # ── 3. Compute threshold (on log scale, back-transform) ──
+  threshold_log <- mu_low + z_thresh * sd_low
+  threshold_raw <- expm1(threshold_log)   # inverse of log1p
+  
+  if (verbose) {
+    cat("── Binarisation summary ─────────────────────────────\n")
+    cat("  Method          :", method, "\n")
+    cat("  Background mean (log1p) :", round(mu_low, 3), "\n")
+    cat("  Background SD   (log1p) :", round(sd_low, 3), "\n")
+    cat("  z threshold     :", z_thresh, "\n")
+    cat("  Threshold (log1p):", round(threshold_log, 3), "\n")
+    cat("  Threshold (raw) :", round(threshold_raw, 3), "\n")
+    n_pos <- sum(expr > threshold_raw)
+    cat("  Positive cells  :", n_pos, "/", length(expr),
+        sprintf("(%.1f%%)\n", 100 * n_pos / length(expr)))
+    cat("─────────────────────────────────────────────────────\n")
+  }
+  
+  # ── 4. Assign binary labels ───────────────────────────────
+  binary <- as.integer(expr > threshold_raw)
+  names(binary) <- names(expr)
+  
+  # ── 5. Diagnostic plot ────────────────────────────────────
+  if (!is.null(plot_out)) {
+    .make_diagnostic_plot(
+      expr          = expr,
+      log_expr      = log_expr,
+      nz_log        = nz_log,
+      binary        = binary,
+      threshold_log = threshold_log,
+      threshold_raw = threshold_raw,
+      mu_low        = mu_low,
+      sd_low        = sd_low,
+      mc            = mc,
+      ref_cells     = ref_cells,
+      method        = method,
+      z_thresh      = z_thresh,
+      plot_out      = plot_out
+    )
+    if (verbose) cat("  Diagnostic plot :", plot_out, "\n")
+  }
+  
+  return(binary)
+}
 
+
+# ============================================================
+#  INTERNAL – diagnostic plot
+# ============================================================
+
+.make_diagnostic_plot <- function(expr, log_expr, nz_log, binary,
+                                  threshold_log, threshold_raw,
+                                  mu_low, sd_low, mc, ref_cells,
+                                  method, z_thresh, plot_out) {
+  
+  df_all <- data.frame(
+    log_expr = log_expr,
+    binary   = factor(binary, levels = c(0, 1),
+                      labels = c("Negative", "Positive"))
+  )
+  
+  # Panel A – raw expression histogram
+  p1 <- ggplot(data.frame(expr = expr), aes(x = expr)) +
+    geom_histogram(bins = 80, fill = "#4a90d9", colour = "white", linewidth = 0.2) +
+    geom_vline(xintercept = threshold_raw, colour = "#e74c3c",
+               linetype = "dashed", linewidth = 0.8) +
+    annotate("text", x = threshold_raw, y = Inf,
+             label = paste0(" threshold\n ", round(threshold_raw, 2)),
+             vjust = 1.4, hjust = -0.05, colour = "#e74c3c", size = 3) +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.05))) +
+    labs(title = "Raw expression (all cells)",
+         x = "Expression", y = "Count") +
+    theme_bw(base_size = 11)
+  
+  # Panel B – log1p non-zero distribution with model overlay
+  x_seq <- seq(min(nz_log) - 0.5, max(nz_log) + 0.5, length.out = 400)
+  n_nz  <- length(nz_log)
+  bw    <- diff(range(nz_log)) / 40          # approx histogram bin width
+  
+  dens_df <- data.frame(x = x_seq)
+  
+  if (!is.null(mc) && mc$G == 2) {
+    prop  <- mc$parameters$pro
+    means <- mc$parameters$mean
+    vars  <- mc$parameters$variance$sigmasq
+    if (length(vars) == 1) vars <- rep(vars, 2)
+    dens_df$low  <- prop[which.min(means)] *
+      dnorm(x_seq, means[which.min(means)], sqrt(vars[which.min(means)])) *
+      n_nz * bw
+    dens_df$high <- prop[which.max(means)] *
+      dnorm(x_seq, means[which.max(means)], sqrt(vars[which.max(means)])) *
+      n_nz * bw
+    dens_df$total <- dens_df$low + dens_df$high
+    overlay <- TRUE
+  } else {
+    overlay <- FALSE
+  }
+  
+  p2 <- ggplot(data.frame(nz_log = nz_log), aes(x = nz_log)) +
+    geom_histogram(bins = 60, fill = "#7fb3d3", colour = "white",
+                   linewidth = 0.2) +
+    geom_vline(xintercept = threshold_log, colour = "#e74c3c",
+               linetype = "dashed", linewidth = 0.8) +
+    annotate("text", x = threshold_log, y = Inf,
+             label = paste0(" threshold\n log1p=", round(threshold_log, 2)),
+             vjust = 1.4, hjust = -0.05, colour = "#e74c3c", size = 3)
+  
+  if (overlay) {
+    p2 <- p2 +
+      geom_line(data = dens_df, aes(x = x, y = low),
+                colour = "#2ecc71", linewidth = 0.9, linetype = "solid") +
+      geom_line(data = dens_df, aes(x = x, y = high),
+                colour = "#e67e22", linewidth = 0.9, linetype = "solid") +
+      geom_line(data = dens_df, aes(x = x, y = total),
+                colour = "black", linewidth = 0.7, linetype = "dotted")
+  }
+  
+  p2 <- p2 +
+    labs(title = paste0("log1p expression – non-zero cells (method: ", method, ")"),
+         subtitle = paste0("Background: μ=", round(mu_low, 2),
+                           "  σ=", round(sd_low, 2),
+                           "  threshold = μ + ", z_thresh, "σ"),
+         x = "log1p(Expression)", y = "Count") +
+    theme_bw(base_size = 11)
+  
+  # Panel C – binarised result
+  tbl <- table(binary)
+  df_bar <- data.frame(
+    label = c("Negative (0)", "Positive (1)"),
+    count = as.integer(tbl[c("0", "1")])
+  )
+  df_bar$pct <- 100 * df_bar$count / sum(df_bar$count)
+  
+  p3 <- ggplot(df_bar, aes(x = label, y = count, fill = label)) +
+    geom_col(width = 0.5, show.legend = FALSE) +
+    geom_text(aes(label = sprintf("%d\n(%.1f%%)", count, pct)),
+              vjust = 1, size = 3.5) +
+    scale_fill_manual(values = c("Negative (0)" = "#95a5a6",
+                                 "Positive (1)" = "#e74c3c")) +
+    labs(title = "Binarised cell counts", x = NULL, y = "Count") +
+    theme_bw(base_size = 11) +
+    theme(axis.text.x = element_text(size = 10))
+  
+  combined <- (p1 | p2) / p3 +
+    plot_annotation(
+      title    = "Gene expression binarisation diagnostics",
+      subtitle = paste0("Total cells: ", length(expr),
+                        "  |  Threshold (raw): ", round(threshold_raw, 3)),
+      theme    = theme(plot.title = element_text(face = "bold", size = 13))
+    )
+  print(combined)
+  
+  ggsave(plot_out, combined, width = 12, height = 8, dpi = 150)
+}
+
+plot_cnv_heatmap <- function(mat, labels, title = "CNV Subclusters",
+                             out_file = NULL, chr_annot = NULL) {
+  
+  # Order cells by cluster
+  cell_order <- order(labels)
+  mat_ord    <- mat[cell_order, ]
+  labs_ord   <- labels[cell_order]
+  
+  # Colour scale: diverging around 0 (log2-ratio) or around 1 (ratio)
+  centre_val <- median(mat)
+  col_fun <- circlize::colorRamp2(
+    c(centre_val - 1, centre_val, centre_val + 1),
+    c("#2166ac", "white", "#b2182b")
+  )
+  
+  # Row annotation – cluster identity
+  n_cl   <- length(unique(labs_ord))
+  cl_col <- setNames(
+    colorRampPalette(brewer.pal(min(n_cl, 9), "Set1"))(n_cl),
+    sort(unique(labs_ord))
+  )
+  row_ann <- ComplexHeatmap::rowAnnotation(
+    Cluster = factor(labs_ord),
+    col     = list(Cluster = cl_col),
+    show_annotation_name = FALSE
+  )
+  
+  # Optional column annotation – chromosome bands
+  col_ann <- NULL
+  if (!is.null(chr_annot)) {
+    genes_in_mat <- colnames(mat_ord)
+    chr_vec      <- chr_annot[genes_in_mat]
+    chr_vec[is.na(chr_vec)] <- "unknown"
+    chr_col <- setNames(
+      colorRampPalette(brewer.pal(8, "Pastel2"))(length(unique(chr_vec))),
+      unique(chr_vec)
+    )
+    col_ann <- ComplexHeatmap::HeatmapAnnotation(
+      Chromosome = chr_vec,
+      col        = list(Chromosome = chr_col),
+      show_annotation_name = FALSE
+    )
+  }
+  
+  ht <- ComplexHeatmap::Heatmap(
+    mat_ord,
+    name              = "Rel. CN",
+    col               = col_fun,
+    cluster_rows      = FALSE,
+    cluster_columns   = FALSE,
+    show_row_names    = FALSE,
+    show_column_names = FALSE,
+    left_annotation   = row_ann,
+    top_annotation    = col_ann,
+    row_split         = factor(labs_ord),
+    column_title      = title,
+    use_raster        = TRUE,
+    raster_quality    = 2
+  )
+  
+  if (!is.null(out_file)) {
+    pdf(out_file, width = 14, height = 8)
+    ComplexHeatmap::draw(ht)
+    dev.off()
+    message("Heatmap saved to: ", out_file)
+  } else {
+    ComplexHeatmap::draw(ht)
+  }
+  
+  invisible(ht)
+}

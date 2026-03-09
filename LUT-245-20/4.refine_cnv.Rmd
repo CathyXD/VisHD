@@ -1,0 +1,126 @@
+---
+title: "CNV refinition and differential expression between tumour and non-tumour"
+output: html_notebook
+---
+
+
+```{r set up}
+library(Seurat)
+library(qs, "~/R_Library/4.5")
+library(fastCNV)
+source("~/VisHD/functions.R")
+library(fastCNV)
+library(clusterProfiler)
+library(dplyr)
+library(patchwork)
+library(ggplot2)
+library(pals)
+library(scDblFinder)
+arg = 4
+
+
+# 4. Define file paths
+# Finds all directories matching 'LUT-*' to create a list of samples.
+paths <- system("realpath ~/VisHD/LUT-*/", intern = T)
+
+# Select the specific sample directory based on the command line argument
+path <- paths[arg]
+setwd(path)
+
+```
+
+```{r}
+
+srt_cell <- qread("banksy_srt.qs")
+DefaultAssay(srt_cell) <- "SpaNorm"
+Dbltest <- scDblFinder(GetAssayData(srt_cell, assay = "Spatial", layer = "counts"), returnType =  "scores", clusters = srt_cell$BANKSY_0.2_snn_res.1, dbr.sd = 1)
+srt_cell <- AddMetaData(srt_cell, as.data.frame(Dbltest))
+
+CB <- read.csv("CB.csv", sep = ",")
+CB$cellid <- as.integer(gsub("cellid_|-1", "", CB$Barcode))
+srt_cell$category <- NA
+srt_cell$category <- paste("CB", CB$CB[match(srt_cell$cell, CB$cellid)])
+srt_cell$category[srt_cell$category == "CB NA"] <- "DT"
+ImageDimPlot(srt_cell, group.by = "category")
+
+srt_bin <- qread("bined_ouput/srt_fastCNV.qs")
+
+srt_cell <- transfer_visiumhd_to_cells(
+  srt_cell,
+  srt_bin,
+  annotation_cols = c("cnv_clusters", "cnv_fraction", "K5_cluster")
+)
+```
+
+# Check doublets
+```{r fig.height=3, fig.width=10}
+ImageFeaturePlot(srt_cell, "score") + ImageDimPlot(srt_cell, group.by = "class")
+DimPlot(srt_cell, group.by = "class", reduction =  "umap") + FeaturePlot(srt_cell, "score", reduction = "umap") + DimPlot(srt_cell)
+```
+The doublet states spread uneven and concentrate in tumour area. 
+Unlike sc data, doublets from a seperate cluster, not sure what does it detected. 
+-> keep the doublet idenitity see the influence when cell type specific analysis
+
+# Check CNV cluster results
+```{r}
+ImageDimPlot(srt_cell, group.by = "cnv_clusters", cols = "polychrome")
+ImageFeaturePlot(srt_cell, "cnv_fraction") 
+DimPlot(srt_cell, group.by = "cnv_clusters", reduction = "banksy0.2.umap") + FeaturePlot(srt_cell, "cnv_fraction", reduction = "banksy0.2.umap")
+ImageDimPlot(srt_cell, group.by = "cnv_clusters", cols = "polychrome", split.by = "category")
+ImageDimPlot(srt_cell, group.by = "K5_cluster", cols = brewer.set3(10))+DimPlot(srt_cell, group.by = "K5_cluster", cols = brewer.set3(10), reduction = "banksy0.2.umap")
+g1 <- VlnPlot(srt_cell, group.by = "BANKSY_0.2_snn_res.1", "cnv_fraction")+labs(y = "cnv_fraction", x = "BANKSY_clsuter") + NoLegend()
+g2 = VlnPlot(srt_cell, group.by = "cnv_clusters", "cnv_fraction")+labs(y = "cnv_fraction", x = "cnv_cluster")+ NoLegend()
+g3 <- VlnPlot(srt_cell, group.by = "K5_cluster", "cnv_fraction")+labs(y = "cnv_fraction", x = "K5_cluster")+ NoLegend()
+g1+g2+g3+plot_layout(ncol = 3)
+
+```
+```{r}
+df <- FetchData(srt_cell, c("BANKSY_0.2_snn_res.1", "K5_cluster", "cnv_fraction", "category"))
+df <- df %>% group_by(category,BANKSY_0.2_snn_res.1, K5_cluster) %>% summarise(n = n(), avg_cnv = mean(cnv_fraction))
+
+ggplot(df, aes(x = BANKSY_0.2_snn_res.1, y = n,  fill = as.factor(K5_cluster))) +
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = as.character(polychrome(12))) +
+  #scale_fill_gradient(high =  "#B2182B", low = "#92C5DE" )+
+  theme_classic()+
+  #geom_text(aes(label = avg_cnv, group = category), position = position_stack(vjust = 0.5),color = "white")+ # Centers labels inside
+  facet_grid(.~category, space = "free", scales = "free")
+```
+
+```{r}
+tree_data <- CNVTree(srt_bin, values ="calls", cnv_thresh = 0.01, healthyClusters = "6")
+```
+
+# Annotate tumour based on cnv fraction 
+```{r fig.height=7, fig.width=12}
+srt_cell$cnv_cutoff <- binarise_expression(srt_cell$cnv_fraction, plot_out = "png/cnv_fraction_binarisation.png")
+```
+```{r}
+ImageDimPlot(srt_cell, group.by = "cnv_cutoff")
+df <- FetchData(srt_cell, c("BANKSY_0.2_snn_res.1", "K5_cluster","cnv_clusters","cnv_cutoff", "cnv_fraction", "category"))
+df <- df %>% group_by(category,BANKSY_0.2_snn_res.1, K5_cluster, cnv_clusters ,cnv_cutoff) %>% summarise(n = n(), avg_cnv = mean(cnv_fraction))
+
+ggplot(df, aes(x = as.factor(cnv_clusters), y = n,  fill = as.factor(cnv_cutoff))) +
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = as.character(polychrome(12))) +
+  #scale_fill_gradient(high =  "#B2182B", low = "#92C5DE" )+
+  theme_classic()+
+  #geom_text(aes(label = avg_cnv, group = category), position = position_stack(vjust = 0.5),color = "white")+ # Centers labels inside
+  facet_grid(.~category, space = "free", scales = "free") +
+  labs(fill = "cnv fraction cutoff", x = "cnv cluster")
+```
+
+```{r}
+srt_cell$tumour_anno <- ifelse(srt_cell$cnv_cutoff == "0"|srt_cell$cnv_clusters == "6", "NoTumour", "Tumour")
+srt_cell$tumour_fullanno <- paste(srt_cell$category, srt_cell$tumour_anno)
+srt_cell$tumour_full_subclone <- paste("CNVsubclone", srt_cell$cnv_clusters, srt_cell$category, srt_cell$tumour_anno)
+
+ImageDimPlot(srt_cell, group.by = "tumour_anno", cols = c(  "#E64B35","#4DBBD5"))
+ImageDimPlot(srt_cell, group.by = "tumour_anno", split.by = "category", cols = c(  "#E64B35","#4DBBD5"))
+ImageDimPlot(srt_cell, group.by = "cnv_clusters",split.by = "tumour_anno",  cols = c("#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4", "#91D1C2", "#DC0000", "#7E6148", "#B09C85"))
+```
+
+```{r}
+saveRDS(srt_cell@meta.data, "tumour_anno.Rds")
+```
+

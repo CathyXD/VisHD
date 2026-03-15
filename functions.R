@@ -66,7 +66,7 @@ createSPEObject <- function(countMat,
 }
 
 do.spanorm <- function(srt){
-  require(SpaNorm)
+  require(SpaNorm, lib.loc = "~/R_Library/4.5")
   
   countMat <- GetAssayData(srt, assay = "Spatial", layer = "counts")
   
@@ -374,9 +374,9 @@ pathwayenrich_plot <- function(top_n, gsea_result, pvalue_show= F, plot = c("enr
   }
   .return_genesetname <- function(id){
     test <- unique(sapply(strsplit(id, split = "_"), '[', 1))
-    if (test %in% unique(sapply(strsplit(Hall$gs_name, split = "_"), '[', 1))) return("Hall")
-    if (test %in% unique(sapply(strsplit(C6$gs_name, split = "_"), '[', 1))) return("C6")
-    if (test %in% unique(sapply(strsplit(C5$gs_name, split = "_"), '[', 1))) return("C5")    
+    if (test[1] %in% unique(sapply(strsplit(Hall$gs_name, split = "_"), '[', 1))) return("Hall")
+    if (test[1] %in% unique(sapply(strsplit(C6$gs_name, split = "_"), '[', 1))) return("C6")
+    if (test[1] %in% unique(sapply(strsplit(C5$gs_name, split = "_"), '[', 1))) return("C5")    
   }
   if(!is.null(save.path)){
     name = paste0(save.path, .return_genesetname(top5_pathways), ".pdf")

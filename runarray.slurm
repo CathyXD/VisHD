@@ -3,13 +3,13 @@
 #SBATCH --account=pawsey1172
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=80G
-#SBATCH --time=10:00:00
-#SBATCH --job-name=Infercnv
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=50G
+#SBATCH --time=01:00:00
+#SBATCH --job-name=convert
 #SBATCH --array=1-4
 #SBATCH --partition=work
-#SBATCH --output="slurmout/3.fastCNV-%j-%a.out"
+#SBATCH --output="slurmout/5.h5ad-%j-%a.out"
 
 dir="${MYSCRATCH}"
 # Set the image and tag we want to use
@@ -37,4 +37,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/3.fastCNV.R "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/5.convert_h5ad.R "$SLURM_ARRAY_TASK_ID"

@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=100G
-#SBATCH --time=10:40:00
+#SBATCH --time=2:40:00
 #SBATCH --job-name=DEG
 #SBATCH --array=1-4
 #SBATCH --partition=work
@@ -14,7 +14,7 @@
 dir="${MYSCRATCH}"
 libpath="/scratch/pawsey1172/sweng/R_Library/4.5"
 # Set the image and tag we want to use
-image="docker://swweng/spatial:4.5v5"
+image="docker://swweng/spatial:4.5v6"
 
 # Load Singularity. The version may change over time.
 module load singularity/4.1.0-slurm

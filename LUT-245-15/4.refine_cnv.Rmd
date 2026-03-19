@@ -137,7 +137,7 @@ ggplot(df, aes(x = as.factor(cnv_clusters), y = n,  fill = as.factor(cnv_cutoff)
 ```
 
 ```{r}
-srt_cell$tumour_anno <- ifelse(srt_cell$cnv_cutoff == "0"|srt_cell$cnv_clusters == "2"|srt_cell$infercnv_hc == "2", "NoTumour", "Tumour")
+srt_cell$tumour_anno <- ifelse(srt_cell$cnv_cutoff == "0"|srt_cell$cnv_clusters == "2"|srt_cell$infercnv_hc %in% c("0","2"), "NoTumour", "Tumour")
 srt_cell$tumour_fullanno <- paste(srt_cell$category, srt_cell$tumour_anno)
 srt_cell$tumour_full_subclone <- paste("CNVsubclone", srt_cell$cnv_clusters, srt_cell$category, srt_cell$tumour_anno)
 

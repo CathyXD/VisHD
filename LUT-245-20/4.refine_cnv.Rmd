@@ -63,6 +63,23 @@ Unlike sc data, doublets from a seperate cluster, not sure what does it detected
 
 # Check CNV cluster results
 ```{r}
+library(infercnv)
+infercnvobj <- readRDS("bined_ouput/infercnv_uncluster/run.final.infercnv_obj")
+hcl <- infercnvobj@tumor_subclusters$hc[["all_observations"]]
+clust_tree <- cutree(hcl, k = 4)
+srt_bin$infercnv_hc <- 0
+srt_bin$infercnv_hc[names(clust_tree)] <- clust_tree
+ImageDimPlot(srt_bin, group.by = "infercnv_hc")
+srt_cell <- transfer_visiumhd_to_cells(
+  srt_cell,
+  srt_bin,
+  annotation_cols = c("infercnv_hc")
+)
+ImageDimPlot(srt_cell, group.by = "infercnv_hc")
+```
+
+
+```{r}
 ImageDimPlot(srt_cell, group.by = "cnv_clusters", cols = "polychrome")
 ImageFeaturePlot(srt_cell, "cnv_fraction") 
 DimPlot(srt_cell, group.by = "cnv_clusters", reduction = "banksy0.2.umap") + FeaturePlot(srt_cell, "cnv_fraction", reduction = "banksy0.2.umap")
@@ -111,7 +128,7 @@ ggplot(df, aes(x = as.factor(cnv_clusters), y = n,  fill = as.factor(cnv_cutoff)
 ```
 
 ```{r}
-srt_cell$tumour_anno <- ifelse(srt_cell$cnv_cutoff == "0"|srt_cell$cnv_clusters == "6", "NoTumour", "Tumour")
+srt_cell$tumour_anno <- ifelse(srt_cell$cnv_cutoff == "0"|srt_cell$cnv_clusters == "6"|srt_cell$infercnv_hc == "0", "NoTumour", "Tumour")
 srt_cell$tumour_fullanno <- paste(srt_cell$category, srt_cell$tumour_anno)
 srt_cell$tumour_full_subclone <- paste("CNVsubclone", srt_cell$cnv_clusters, srt_cell$category, srt_cell$tumour_anno)
 

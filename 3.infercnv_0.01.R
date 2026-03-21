@@ -8,7 +8,11 @@ path <- paths[arg]
 setwd(path)
 setwd("bined_ouput")
 cat("working on", path , "bined_ouput\n")
-
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(pals)
 library(infercnv)
 library(qs,lib.loc = "~/R_Library/4.5")
 srt <- qread("srt_fastCNV.qs")

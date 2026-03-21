@@ -6,7 +6,8 @@ output: html_notebook
 
 ```{r set up}
 library(Seurat)
-library(qs, "~/R_Library/4.5")
+library(qs, lib.loc = "~/R_Library/4.5")
+library(qs2)
 library(fastCNV)
 source("~/VisHD/functions.R")
 library(fastCNV)
@@ -15,7 +16,9 @@ library(dplyr)
 library(patchwork)
 library(ggplot2)
 library(pals)
-library(scDblFinder)
+#library(scDblFinder, lib.loc = "~/R_Library/4.5")
+library(infercnv)
+library(dendextend, lib.loc = "~/R_Library/4.5")
 arg = 3
 
 
@@ -33,22 +36,22 @@ setwd(path)
 
 srt_cell <- qread("banksy_srt.qs")
 DefaultAssay(srt_cell) <- "SpaNorm"
-Dbltest <- scDblFinder(GetAssayData(srt_cell, assay = "Spatial", layer = "counts"), returnType =  "scores", clusters = srt_cell$BANKSY_0.2_snn_res.1, dbr.sd = 1)
-srt_cell <- AddMetaData(srt_cell, as.data.frame(Dbltest))
+srt_cell <- AddModuleScore(srt_cell, list(c("KLK2", "KLK3", "KLK4", "TMPRSS2", "FOLH1", "NKX3-1", "HOXB13", "TRPM8")))
+  srt_cell$tumour_score <- srt_cell$Cluster1
+srt_cell <- AddMetaData(srt_cell, readRDS("tumour_anno.Rds"))
 
-CB <- read.csv("CB.csv", sep = "\t")
-srt_cell$category <- NA
-srt_cell$category <- paste("CB", CB$CB[match(srt_cell$cell, CB$cellid)])
-srt_cell$category[srt_cell$category == "CB NA"] <- "DT"
-ImageDimPlot(srt_cell, group.by = "category")
-
-srt_bin <- qread("bined_ouput/srt_fastCNV.qs")
-
+srt_cell$tumour_cutoff <- binarise_expression(srt_cell$tumour_score, plot_out = "png/tumour_score_binarisation.png", min_expr = min(srt_cell$tumour_score))
+  
+srt_bin <- qs_read("bined_ouput/srt_infercnv.qs2")
 srt_cell <- transfer_visiumhd_to_cells(
   srt_cell,
   srt_bin,
-  annotation_cols = c("cnv_clusters", "cnv_fraction", "K5_cluster")
+  annotation_cols = c("tumour_score_UCell", "normal_score_UCell", "tumour_normal")
 )
+ 
+ImageFeaturePlot(srt_bin, c("tumour_score_UCell", "normal_score_UCell"))
+ImageDimPlot(srt_bin, group.by = "tumour_normal")
+ImageDimPlot(srt_cell, group.by = "tumour_cutoff") + ImageDimPlot(srt_cell, group.by = "tumour_normal")
 ```
 
 # Check doublets
@@ -61,32 +64,50 @@ Unlike sc data, doublets from a seperate cluster, not sure what does it detected
 -> keep the doublet idenitity see the influence when cell type specific analysis
 
 # Check CNV cluster results
-```{r}
-library(infercnv)
-infercnvobj <- readRDS("bined_ouput/infercnv_uncluster/run.final.infercnv_obj")
-hcl <- infercnvobj@tumor_subclusters$hc[["all_observations"]]
-clust_tree <- cutree(hcl, k = 2)
-srt_bin$infercnv_hc <- 0
+```{r fig.height=4, fig.width=10}
+infercnvobj <- readRDS("bined_ouput/infercnv_test/run.final.infercnv_obj")
+class(infercnvobj@reference_grouped_cell_indices$`0 1`)
+hcl <- lapply(infercnvobj@tumor_subclusters$hc, as.dendrogram)
+hcl <- Reduce(merge, hcl)
+clust_tree <- cutree(hcl, k = 4)
+srt_bin$infercnv_hc <- NA
 srt_bin$infercnv_hc[names(clust_tree)] <- clust_tree
-ImageDimPlot(srt_bin, group.by = "infercnv_hc")
+srt_bin$infercnv_hc_anno <- NA
+srt_bin$infercnv_hc_anno[names(clust_tree)] <- paste(srt_bin$tumour_normal[names(clust_tree)] , srt_bin$infercnv_hc[names(clust_tree)] , sep = "-")
+srt_bin$infercnv_hc_anno[colnames(infercnvobj@expr.data)[infercnvobj@reference_grouped_cell_indices$`0 1`]] <- "ref" 
+ImageDimPlot(srt_bin, group.by = "infercnv_hc", cols = brewer.set3(7)) + ImageDimPlot(srt_bin, group.by = "infercnv_hc_anno", cols ="polychrome")
+```
+```{r}
 srt_cell <- transfer_visiumhd_to_cells(
   srt_cell,
   srt_bin,
-  annotation_cols = c("infercnv_hc")
+  annotation_cols = c("infercnv_hc","infercnv_hc_anno")
 )
-ImageDimPlot(srt_cell, group.by = "infercnv_hc")
-
-df <- FetchData(srt_cell, c("BANKSY_0.2_snn_res.1", "K5_cluster", "cnv_fraction", "category", "infercnv_hc"))
-df <- df %>% group_by(category,infercnv_hc, K5_cluster) %>% summarise(n = n(), avg_cnv = mean(cnv_fraction))
-
-ggplot(df, aes(x = infercnv_hc, y = n,  fill = as.factor(K5_cluster))) +
-  geom_bar(stat = "identity") + 
-  scale_fill_manual(values = as.character(polychrome(12))) +
-  #scale_fill_gradient(high =  "#B2182B", low = "#92C5DE" )+
-  theme_classic()+
-  #geom_text(aes(label = avg_cnv, group = category), position = position_stack(vjust = 0.5),color = "white")+ # Centers labels inside
-  facet_grid(.~category, space = "free", scales = "free")
+ImageDimPlot(srt_cell, group.by = "infercnv_hc", cols = "polychrome")
+ImageDimPlot(srt_cell, group.by = "infercnv_hc", split.by = "category", cols = "polychrome")
 ```
+```{r}
+
+srt_cell$tumour_anno <- ifelse(srt_cell$infercnv_hc %in% c("1", "4"), "NoTumour", "Tumour")
+srt_cell$tumour_anno[is.na(srt_cell$infercnv_hc)] <- NA
+
+#if various subclone observe
+srt_cell$subclone <- srt_cell$tumour_anno
+srt_cell$subclone[ srt_cell$tumour_anno == "Tumour"] <- "1"
+# srt_cell$subclone[srt_cell$infercnv_hc %in% c("4") ] <- "2"
+
+
+counts <- table(srt_cell$tumour_anno)
+formatted_counts <- sprintf("Tumour = %d; Normal = %d", counts["Tumour"], counts["NoTumour"])
+ImageDimPlot(srt_cell, group.by = "tumour_anno", cols = c(  "#E64B35","#4DBBD5")) + ggtitle( formatted_counts)
+
+counts <- table(srt_cell$subclone)
+formatted_counts <- sprintf("Subclone 1 = %d", counts["1"])
+ImageDimPlot(srt_cell, group.by = "subclone",  cols = c("1" = "#E64B35", "2" = "gold", "NoTumour" = "white"))+ ggtitle( formatted_counts)
+ImageDimPlot(srt_cell, group.by = "subclone",  cols = c("1" = "#E64B35", "2" = "gold", "NoTumour" = "white"), split.by = "category")
+qs_save(srt_cell, "tumour_anno_srt.qs2")
+```
+
 
 ```{r}
 ImageDimPlot(srt_cell, group.by = "cnv_clusters", cols = "polychrome")

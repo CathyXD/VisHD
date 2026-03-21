@@ -109,11 +109,11 @@ DimPlot(visHD_annotated, group.by= "celltype_annotation", cols = "polychrome", r
 FeaturePlot(visHD_annotated, "secondary_expr_frac", reduction= "banksy0.2.umap")
 VlnPlot(visHD_annotated, "nFeature_Spatial", group.by = "celltype_annotation")
 
-
-DotPlot(visHD_annotated, features = lapply(tme_markers function(x) intersect(x, rownames(visHD_annotated))), group.by = "celltype_annotation")
-# Marker dot plot
-plot_marker_dotplot(visHD_annotated, tme_markers)
-
-# Which clusters fell back to secondary?
-subset(visHD_annotated@misc$cluster_annotation,
-       annotation_source %in% c("secondary", "unknown"))
+# 
+# DotPlot(visHD_annotated, features = lapply(tme_markers,function(x) intersect(x, rownames(visHD_annotated))), group.by = "celltype_annotation")
+# # Marker dot plot
+# plot_marker_dotplot(visHD_annotated, tme_markers)
+# 
+# # Which clusters fell back to secondary?
+# subset(visHD_annotated@misc$cluster_annotation,
+#        annotation_source %in% c("secondary", "unknown"))

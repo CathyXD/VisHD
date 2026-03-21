@@ -7,7 +7,7 @@ library(dplyr)
 library(qs, lib.loc = "~/R_Library/4.5")  
 library(pals)
 source("~/VisHD/functions.R")
-
+source("~/VisHD/normal_markers.R")
 
 args <- commandArgs(trailingOnly = TRUE)
 arg <- as.numeric(args[1])
@@ -31,7 +31,13 @@ i = samples[arg]
   test <- ImageFeaturePlot(srt_cell, "tumour_score") + FeaturePlot(srt_cell, "tumour_score") + VlnPlot(srt_cell , "tumour_score", group.by = "SR_Cluster")
   ggsave(plot = test, "png/spanorm_tumour_score.png", width = 10, height = 4)
   srt_cell$tumour_cutoff <- binarise_expression(srt_cell$tumour_score,min_expr = min(srt_cell$tumour_score),  plot_out = "png/tumour_score_binarisation.png")
-  
+  normal_modules <- intersect(unlist(all_marker), rownames(srt_cell))
+  srt_cell <- AddModuleScore(srt_cell, list(normal_modules))
+  srt_cell$normal_score <- srt_cell$Cluster1
+  ImageFeaturePlot(srt_cell, "normal_score") + FeaturePlot(srt_cell, "normal_score")
+  srt_cell$normal_cutoff <- binarise_expression(srt_cell$normal_score,min_expr = 0,  plot_out = "png/normal_score_binarisation.png")
+  srt_cell$tumour_normal <- paste(srt_cell$tumour_cutoff, srt_cell$normal_cutoff)
+  ImageDimPlot(srt_cell, group.by = "tumour_normal")
   
   setwd("bined_ouput")
   srt <- qread("srt.qs")

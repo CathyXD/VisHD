@@ -3,13 +3,13 @@
 #SBATCH --account=pawsey1172
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=6
-#SBATCH --mem=80G
-#SBATCH --time=03:00:00
-#SBATCH --job-name=infercnv
-#SBATCH --array=1-2
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=150G
+#SBATCH --time=08:00:00
+#SBATCH --job-name=split
+#SBATCH --array=1-4
 #SBATCH --partition=work
-#SBATCH --output="slurmout/3.CNV-%j-%a.out"
+#SBATCH --output="slurmout/5.split-%j-%a.out"
 
 dir="${MYSCRATCH}"
 # Set the image and tag we want to use
@@ -37,4 +37,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/3.infercnv_0.01.R "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/5.tumour_normal_split.R "$SLURM_ARRAY_TASK_ID"

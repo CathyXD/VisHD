@@ -125,9 +125,9 @@ srt$nucleus_area <- as.numeric(nucleus_area[colnames(srt)])
 # Save raw object before filtering
 qsave(srt, "raw_srt.qs")
 
-# ==============================================================================
-# QC AND FILTERING
-# ==============================================================================
+
+# QC AND FILTERING==============================================================
+
 
 # 13. Filter Low Quality Cells
 # Special handling for sample "LUT-245-20" (fixed cutoff > 25 genes)
@@ -138,9 +138,9 @@ if(grepl("LUT-245-20", path)){
   srt <- subset(srt, cells = colnames(srt)[srt$nFeature_Spatial > quantile(srt$nFeature_Spatial, 0.05)])
 }
 
-# ==============================================================================
-# MODULE SCORING (TUMOUR VS NORMAL)
-# ==============================================================================
+
+# MODULE SCORING (TUMOUR VS NORMAL) ============================================
+
 
 # 14. Load Gene Signatures
 clean_module <- readRDS("~/CASCADEpaper/paper/Fig5_archetype/clean_module.Rds")

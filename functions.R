@@ -67,7 +67,7 @@ createSPEObject <- function(countMat,
 
 do.spanorm <- function(srt){
   require(SpaNorm, lib.loc = "~/R_Library/4.5")
-  
+  require(leidenbase,  lib.loc = "~/R_Library/4.5")
   countMat <- GetAssayData(srt, assay = "Spatial", layer = "counts")
   
   spatial_coord <- GetTissueCoordinates(srt)[, c("x", "y")]
@@ -348,7 +348,7 @@ pathwayenrich_plot <- function(top_n, gsea_result, pvalue_show= F, plot = c("enr
   p[[1]] <- p[[1]] + theme(
     legend.position  = "bottom",
     legend.direction = "horizontal"
-  )+ guides(color = guide_legend(ncol =3))
+  )+ guides(color = guide_legend(ncol =2))
   
   # Reassemble with patchwork
   

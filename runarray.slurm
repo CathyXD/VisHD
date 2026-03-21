@@ -4,12 +4,12 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=50G
-#SBATCH --time=01:00:00
-#SBATCH --job-name=convert
+#SBATCH --mem=150G
+#SBATCH --time=08:00:00
+#SBATCH --job-name=split
 #SBATCH --array=1-4
 #SBATCH --partition=work
-#SBATCH --output="slurmout/5.h5ad-%j-%a.out"
+#SBATCH --output="slurmout/5.split-%j-%a.out"
 
 dir="${MYSCRATCH}"
 # Set the image and tag we want to use
@@ -37,4 +37,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/5.convert_h5ad.R "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/5.tumour_normal_split.R "$SLURM_ARRAY_TASK_ID"

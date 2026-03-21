@@ -8,26 +8,26 @@ spatial_plot <- function(srt, outdir, name) {
     {
       f1 <- ImageDimPlot(srt, cols = "polychrome",border.color = "#00000000", size = 0.3)
       f2 <- ImageDimPlot(srt,  split.by = "seurat_clusters", cols = "polychrome",border.color = "#00000000", size = 0.3)
-      ggsave(plot = f1 + f2 + plot_layout(ncol = 2), paste0(outdir, name, "_ImageDimPlot.png"), width = 10, height = 5, dpi = 350)
+      ggsave(plot = f1 + f2 + plot_layout(ncol = 2), paste0(outdir, name, "_ImageDimPlot.png"), width = 10, height = 5, dpi = 350, create.dir =T)
       
       f1 <- ImageDimPlot(srt, group.by = "SR_Cluster", cols = "polychrome",border.color = "#00000000", size = 0.3)
       f2 <- ImageDimPlot(srt, group.by = "SR_Cluster",  split.by = "SR_Cluster", cols = "polychrome",border.color = "#00000000", size = 0.3)
-      ggsave(plot = f1 + f2 + plot_layout(ncol = 2), paste0(outdir, name, "SR_Cluster_ImageDimPlot.png"), width = 10, height = 5, dpi = 350)
+      ggsave(plot = f1 + f2 + plot_layout(ncol = 2), paste0(outdir, name, "SR_Cluster_ImageDimPlot.png"), width = 10, height = 5, dpi = 350, create.dir =T)
       
       
       f3 <- ImageFeaturePlot(srt, c("AR", "FOLH1", "ASCL1", "COL1A1","cell_area", "nucleus_area","nFeature_Spatial", "nCount_Spatial"), size = 0.3)
-      ggsave(plot = f3 +  plot_layout(ncol = 4), paste0(outdir, name, "_ImageFeaturePlot.png"), width = 13, height = 6, dpi = 350)
+      ggsave(plot = f3 +  plot_layout(ncol = 4), paste0(outdir, name, "_ImageFeaturePlot.png"), width = 13, height = 6, dpi = 350, create.dir =T)
       
       g1 <- DimPlot(srt, cols = "polychrome", label = T)
       g2 <- DimPlot(srt,  group.by = "SR_Cluster", cols = "polychrome", label = T)
-      ggsave(plot = g1 + g2 + plot_layout(ncol = 2), paste0(outdir, name, "_DimPlot.png"), width = 10, height = 5, dpi = 350)
+      ggsave(plot = g1 + g2 + plot_layout(ncol = 2), paste0(outdir, name, "_DimPlot.png"), width = 10, height = 5, dpi = 350, create.dir =T)
       
       g3 <- FeaturePlot(srt, c("AR", "FOLH1", "ASCL1", "COL1A1","cell_area", "nucleus_area","nFeature_Spatial", "nCount_Spatial"))
       ggsave(plot = g3 + plot_layout(ncol = 4), paste0(outdir, name, "_FeaturePlot.png"), width = 12, height = 5, dpi = 350)
       
       p1 <- VlnPlot(srt, features = c("nFeature_Spatial", "nCount_Spatial"), ncol = 2, pt.size = 0, group.by = "seurat_clusters")
       p2 <- VlnPlot(srt, features = c("AR", "FOLH1", "ASCL1", "COL1A1"), ncol = 4, pt.size = 0, group.by = "seurat_clusters")        # the function you want to run first
-      ggsave(plot = (p1|p2) + plot_layout(width = c(1, 2)), paste0(outdir, name, "_VlnPlot.png"), width = 15, height = 4, dpi = 350)
+      ggsave(plot = (p1|p2) + plot_layout(width = c(1, 2)), paste0(outdir, name, "_VlnPlot.png"), width = 15, height = 4, dpi = 350, create.dir =T)
     },
     error = function(e) {
       message("Main function failed: ", e$message)

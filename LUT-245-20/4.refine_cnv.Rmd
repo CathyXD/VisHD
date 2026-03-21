@@ -63,6 +63,23 @@ Unlike sc data, doublets from a seperate cluster, not sure what does it detected
 
 # Check CNV cluster results
 ```{r}
+library(infercnv)
+infercnvobj <- readRDS("bined_ouput/infercnv_uncluster/run.final.infercnv_obj")
+hcl <- infercnvobj@tumor_subclusters$hc[["all_observations"]]
+clust_tree <- cutree(hcl, k = 4)
+srt_bin$infercnv_hc <- 0
+srt_bin$infercnv_hc[names(clust_tree)] <- clust_tree
+ImageDimPlot(srt_bin, group.by = "infercnv_hc")
+srt_cell <- transfer_visiumhd_to_cells(
+  srt_cell,
+  srt_bin,
+  annotation_cols = c("infercnv_hc")
+)
+ImageDimPlot(srt_cell, group.by = "infercnv_hc")
+```
+
+
+```{r}
 ImageDimPlot(srt_cell, group.by = "cnv_clusters", cols = "polychrome")
 ImageFeaturePlot(srt_cell, "cnv_fraction") 
 DimPlot(srt_cell, group.by = "cnv_clusters", reduction = "banksy0.2.umap") + FeaturePlot(srt_cell, "cnv_fraction", reduction = "banksy0.2.umap")

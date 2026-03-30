@@ -1,3 +1,26 @@
+library(Seurat)
+library(qs, lib.loc = "~/R_Library/4.5")
+source("~/VisHD/functions.R")
+library(dplyr)
+library(SpaNorm, lib.loc = "~/R_Library/4.5")
+library(qs2)
+library(leidenbase, lib.loc = "~/R_Library/4.5")
+library(UCell, lib.loc = "~/R_Library/4.5")
+library(ggplot2)
+library(patchwork)
+
+library(msigdbr)
+library(dplyr)
+library(purrr)
+library(stringr)
+
+
+paths <- system("realpath ~/VisHD/LUT-*/normal/", intern = T)
+source("~/VisHD/normal_markers.R")
+SVEC_marker <-  c("SEMG1", "SEMG2", "MUC6", "PGC", "CYP4F8", "CLU", "PDK4", "SLPI", "AKR1B1", "KRT7", "SLC26A3", "PATE1", "PAX8")
+# Select the specific sample directory based on the command line argument
+
+## Try cell type annotation based on cluster using pre function====================
 tme_markers <- list(
   Epithelial  = c("EPCAM","KRT8","KRT18","CDH1","MUC1"),
   T_Cells_Pan = c("CD3D","CD3E","CD3G","CD2"),
@@ -15,13 +38,6 @@ tme_markers <- list(
   Pericytes   = c("RGS5","MCAM","CSPG4")
 )
 
-# ── Option A: secondary = plain vector (QC only, no fallback annotation) ──
-secondary_qc_panel <- c(
-  "ACTB","GAPDH","B2M","HSP90AB1","RPL13","RPS18","MALAT1","NEAT1",
-  "EEF1A1","TPT1","FTL","FTH1","HSPA1A","HSPA1B",
-  # add broad cell-type housekeeping genes here ...
-  VariableFeatures(visHD_obj)   # or simply pass HVGs
-)
 
 # ── Option B: secondary = named list (QC + fallback annotation) ────────────
 secondary_markers <- list(
@@ -40,10 +56,6 @@ secondary_markers <- list(
 # Install required packages if you don't have them
 # install.packages(c("msigdbr", "dplyr", "purrr", "stringr"))
 
-library(msigdbr)
-library(dplyr)
-library(purrr)
-library(stringr)
 
 # 1. Fetch the entire MSigDB C8 (Cell Type Signatures) collection for Human
 cat("Fetching MSigDB C8 collection...\n")
@@ -81,39 +93,68 @@ extract_c8_genes <- function(df, search_pattern) {
 
 # 4. Map the function over our search terms to build the final list
 c8_tme_markers <- map(tme_search_terms, ~extract_c8_genes(c8_data, .x))
+source("~/VisHD/celltype_annotation_function.R")
 
-# Print a summary of how many genes were extracted per cell type
-cat("Number of unique genes extracted per cell type from C8:\n")
-print(lengths(c8_tme_markers))
 
-# ── Run the pipeline ───────────────────────────────────────────────────────
-# Use existing seurat_clusters (default)
-visHD_annotated <- tme_cluster_annotation_pipeline(
-  obj                 = normal_srt,
-  tme_markers         = tme_markers,
-  secondary_genes     = c8_tme_markers,
-  cluster_col         = "seurat_clusters",   # or e.g. "leiden_res0.5", "spatial_domain"
-  assay               = "SpaNorm",
-  data_slot           = "data",
-  expr_min_val        = 0,
-  primary_expr_frac   = 0.05,
-  secondary_expr_frac = 0.10,
-  min_markers         = 3,
-  conf_threshold      = 0.2,
-  exclusivity_weight  = 0.30,
-  detection_min       = 0.01,
-  trim                = 0.10
-)
+metalist <- list()
+for (path in paths){
+  print(path)
+  setwd(path)
+  
+  normal_srt <- qs_read("normal_srt.qs2")
+  DefaultAssay(normal_srt) <- "SpaNorm"
+  normal_srt <- AddModuleScore(normal_srt, all_marker)
+  # Rename the resulting metadata columns (Cluster1, Cluster2...) to actual cell types
+  colnames(normal_srt@meta.data)[colnames(normal_srt@meta.data) %in% paste0("Cluster", 1:13)] <- names(all_marker)
+  
+  g <- ImageFeaturePlot(normal_srt, names(all_marker), cols = c("white", "red"))
+  ggsave("png/spanorm_ImageFeaturePlot_normal_score.png", plot = g, width = 25, height = 15, dpi = 350)
+  g <- FeaturePlot(normal_srt, names(all_marker), cols = c("white", "red"))
+  ggsave("png/spanorm_FeaturePlot_normal_score.png", plot = g, width = 25, height = 15, dpi = 350)
+  
+  g <- FeaturePlot(normal_srt, names(all_marker), cols = c("white", "red"), reduction = "banksy0.2.umap")
+  ggsave("png/Banksy_FeaturePlot_normal_score.png", plot = g, width = 25, height = 15, dpi = 350)
+  
+  test <- FeaturePlot(normal_srt, SVEC_marker, reduction = "banksy0.2.umap")
+  ggsave(plot = test, "png/SVEC_marker.png", width = 12, height= 12)
+  
+  normal_srt <- AddModuleScore(normal_srt, c8_tme_markers)
+  colnames(normal_srt@meta.data)[colnames(normal_srt@meta.data) %in% paste0("Cluster", 1:14)] <- names(c8_tme_markers)
+  g <- FeaturePlot(normal_srt, names(c8_tme_markers), cols = c("white", "red"), reduction = "banksy0.2.umap")
+  ggsave("png/Banksy_FeaturePlot_c8_tme_markers.png", plot = g, width = 25, height = 15, dpi = 350)
+  
+  normal_srt <- tme_cluster_annotation_pipeline(
+    obj                 = normal_srt,
+    tme_markers         = tme_markers,
+    secondary_genes     = c8_tme_markers,
+    cluster_col         = "seurat_clusters",   # or e.g. "leiden_res0.5", "spatial_domain"
+    assay               = "SpaNorm",
+    data_slot           = "data",
+    expr_min_val        = 0,
+    primary_expr_frac   = 0.05,
+    secondary_expr_frac = 0.01,
+    min_markers         = 3,
+    conf_threshold      = 0.2,
+    exclusivity_weight  = 0.30,
+    detection_min       = 0.01,
+    trim                = 0.10
+  )
+  
+  g <- DimPlot(normal_srt, group.by= "celltype_annotation", cols = "polychrome", reduction= "banksy0.2.umap") +  DimPlot(normal_srt, group.by= "celltype_annotation", cols = "polychrome", reduction= "banksy0.2.umap", split.by = "category")
+  ggsave(plot = g, "png/cell_type_anno_Dimplot.pdf", width = 12, height = 4)
+  g <- ImageDimPlot(normal_srt, group.by= "celltype_annotation", cols = "polychrome")
+  ggsave(plot = g, "png/cell_type_anno_ImageDimplot.png", width = 6, height = 4)
+  g <- FeaturePlot(normal_srt, "secondary_expr_frac", reduction= "banksy0.2.umap") + VlnPlot(normal_srt, "nFeature_Spatial", group.by = "celltype_annotation")
+  ggsave(plot = g, "png/cell_type_anno_QC.png", width = 6, height = 4)
+  saveRDS(normal_srt@meta.data, "normal_meta.Rds")
+  metalist[[strsplit(path, split = "/")[[1]][5]]] <- normal_srt@meta.data
+}
 
-DimPlot(visHD_annotated, group.by= "celltype_annotation", cols = "polychrome", reduction= "banksy0.2.umap")
-FeaturePlot(visHD_annotated, "secondary_expr_frac", reduction= "banksy0.2.umap")
-VlnPlot(visHD_annotated, "nFeature_Spatial", group.by = "celltype_annotation")
+df <- data.table::rbindlist(metalist, idcol = "sample", fill =T)
+plotdf <- df %>% select(c("sample", "category", "celltype_annotation")) %>% group_by(sample, category, celltype_annotation) %>% summarise(n = n()) %>% mutate(prop = n/sum(n))
 
-# 
-# DotPlot(visHD_annotated, features = lapply(tme_markers,function(x) intersect(x, rownames(visHD_annotated))), group.by = "celltype_annotation")
-# # Marker dot plot
-# plot_marker_dotplot(visHD_annotated, tme_markers)
-# 
-# # Which clusters fell back to secondary?
-# subset(visHD_annotated@misc$cluster_annotation,
-#        annotation_source %in% c("secondary", "unknown"))
+ggplot(plotdf, aes(x = category, y = prop, fill = celltype_annotation)) +
+  geom_bar(stat = "identity") +
+  theme_classic()+
+  facet_grid(.~ sample, space = "free", scale = "free")+
+  scale_fill_manual(values = as.character(pals::polychrome(12)))

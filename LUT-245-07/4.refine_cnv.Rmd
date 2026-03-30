@@ -84,7 +84,7 @@ infercnvobj <- readRDS("bined_ouput/infercnv_test/run.final.infercnv_obj")
 class(infercnvobj@reference_grouped_cell_indices$`0 1`)
 hcl <- lapply(infercnvobj@tumor_subclusters$hc, as.dendrogram)
 hcl <- Reduce(merge, hcl)
-clust_tree <- cutree(hcl, k = 7)
+clust_tree <- dendextend::cutree(hcl, k = 7, order_clusters_as_data = F)
 srt_bin$infercnv_hc <- NA
 srt_bin$infercnv_hc[names(clust_tree)] <- clust_tree
 srt_bin$infercnv_hc_anno <- NA
@@ -120,8 +120,8 @@ ImageDimPlot(srt_cell, group.by = "tumour_anno", cols = c(  "#E64B35","#4DBBD5")
 
 counts <- table(srt_cell$subclone)
 formatted_counts <- sprintf("Subclone 1 = %d; Subclone 2 = %d", counts["1"], counts["2"])
-ImageDimPlot(srt_cell, group.by = "subclone",  cols = c("#E64B35", "gold", "white", "#3C5488", "#F39B7F", "#8491B4", "#91D1C2", "#DC0000", "#7E6148", "#B09C85"))+ ggtitle( formatted_counts)
-ImageDimPlot(srt_cell, group.by = "subclone",  cols = c("#E64B35", "gold", "white", "#3C5488", "#F39B7F", "#8491B4", "#91D1C2", "#DC0000", "#7E6148", "#B09C85"), split.by = "category")
+ImageDimPlot(srt_cell, group.by = "subclone",  cols = c("1"="#E64B35", "2"="gold", "NoTumour"= "white"))+ ggtitle( formatted_counts)#, "#3C5488", "#F39B7F", "#8491B4", "#91D1C2", "#DC0000", "#7E6148", "#B09C85"
+ImageDimPlot(srt_cell, group.by = "subclone",  cols = c("1"="#E64B35", "2"="gold", "NoTumour"= "white"), split.by = "category")
 qs_save(srt_cell, "tumour_anno_srt.qs2")
 ```
 ```{r}

@@ -15,8 +15,8 @@ library(patchwork)
 library(dplyr)
 library(hdf5r)      # For reading .h5 files
 library(data.table) # For high-performance data manipulation
-library(sf, lib.loc = "~/R_Library/4.5")         # For handling spatial vector data (GeoJSON)
-library(qs, lib.loc = "~/R_Library/4.5")         # For fast reading/writing of R objects
+#library(sf)         # For handling spatial vector data (GeoJSON)
+library(qs)         # For fast reading/writing of R objects
 
 # 3. Load custom internal functions
 # 'functions.R' likely contains helper utils and 'do.spanorm'.
@@ -26,24 +26,24 @@ source("~/VisHD/functions.R")
 
 # 4. Define file paths
 # Finds all directories matching 'LUT-*' to create a list of samples.
-paths <- system("realpath ~/VisHD/LUT-*/", intern = T)
+paths <- system("realpath ~/VisHD/raw/LUT*", intern = T)
 
 # Select the specific sample directory based on the command line argument
 path <- paths[arg]
-path <- paste0(path, "/analysis/segmented_outputs/")
+sample <- sapply(strsplit(path, split = "/"), "[", 6)
 
 cat("===========working in", path, "=================\n")
 
 # Create the working directory if it doesn't exist and set it as the working dir
-if (!dir.exists(path)) dir.create(path, recursive = TRUE)
-setwd(path)
+if (!dir.exists(paste0("~/VisHD/", sample))) dir.create(paste0("~/VisHD/", sample), recursive = TRUE)
+setwd(paste0("~/VisHD/", sample))
 
 # ==============================================================================
 # DATA LOADING AND PRE-PROCESSING
 # ==============================================================================
 
 # 5. Load Expression Data
-localdir <- paste0(paths[arg], "/outs/segmented_outputs/")
+localdir <- paste0(paths, "/outs/segmented_outputs/")
 # Read the 10X HDF5 gene expression matrix
 counts <- Read10X_h5(paste0(localdir, "filtered_feature_cell_matrix.h5"), unique.features = T)
 

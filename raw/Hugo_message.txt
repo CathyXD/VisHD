@@ -1,0 +1,15 @@
+Scans + metadata:
+​Folder icon https://petermacvic.sharepoint.com/:f:/s/CentreforAdvancedHistologyandMicroscopy-GeoMXDSP/IgDWEZxjlH0KRaa2ueA2M-GiAVrzlhGRCb-HGSxdCHLHPtk
+ 
+fastqs:
+                /pipeline/Runs/NextSeq/251120_VH01624_389_222CWN5NX/ProjectFolders/Project_Sirui-Weng/…
+ 
+References:
+                https://www.10xgenomics.com/support/software/space-ranger/downloads
+ref: GRCh38-2024-A
+probes: Human Transcriptome v2.1
+ 
+There is an older reference available on nasprod if this is easier:
+/data/reference/spaceranger/refdata-gex-GRCh38-2020-A
+But please note that the correct annotations for this reference are the Human Transcriptome v2 probe-set (not v2.1).
+ 

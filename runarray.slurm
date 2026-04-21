@@ -1,15 +1,15 @@
 #!/bin/bash -l
 # Allocate slurm resources, edit as necessary
-#SBATCH --account=pawsey1172
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=150G
-#SBATCH --time=08:00:00
-#SBATCH --job-name=split
-#SBATCH --array=1-4
-#SBATCH --partition=work
-#SBATCH --output="slurmout/5.split-%j-%a.out"
+#SBATCH --mem=80G
+#SBATCH --time=03:00:00
+#SBATCH --job-name=generate
+#SBATCH --array=2-3,6-7
+#SBATCH --output="slurmout/0.generate-%j-%a.out"
+#SBATCH --mail-user=Sirui.Weng@petermac.org
+#SBATCH --mail-type=ALL
 
 dir="${MYSCRATCH}"
 # Set the image and tag we want to use

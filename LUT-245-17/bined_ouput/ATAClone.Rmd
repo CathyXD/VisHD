@@ -1,0 +1,173 @@
+---
+title: "ATAClone"
+output: html_notebook
+---
+```{r setup}
+library("ATAClone")
+library("MatrixGenerics")
+library("ggplot2")
+library(qs2)
+library(dplyr)
+library(Matrix)
+library(Seurat)
+```
+
+```{r}
+setwd("~/VisHD/LUT-245-17/bined_ouput")
+srt <- qs_read("srt_infercnv.qs2")
+generef <- readRDS("~/VisHD/gene_ord2.Rds")
+bin_width <- 10e6 
+gene_coords <- generef %>%
+    mutate(
+        chr = chr  ,     # ensure "chr1" format
+        bin = paste0(chr, "_", floor(start / bin_width) * bin_width)
+    )
+gene_coords$gene <- rownames(gene_coords)
+gene_bin_map <- gene_coords %>%
+    filter(gene %in% rownames(srt)) %>%
+    select(gene , bin) %>%
+    distinct(gene, .keep_all = TRUE)
+
+
+
+```
+```{r}
+table(gene_bin_map$bin)
+gene_bin_map <- gene_bin_map %>% filter(bin %in% names(which(table(gene_bin_map$bin)>5 ))) # filter bins with less than 5 genes 
+mat_sub <- GetAssayData(srt, layer = "counts")[gene_bin_map$gene, ]
+
+bin_matrix <- function(mat, gene_bin_map){
+    # Build a bin aggregation matrix (genes x bins)
+  bins       <- unique(gene_bin_map$bin)
+  gene_order <- gene_bin_map$gene
+  
+  agg_mat <- Matrix(0, nrow = length(bins), ncol = length(gene_order), sparse = TRUE)
+  rownames(agg_mat) <- bins
+  colnames(agg_mat) <- gene_order
+  
+  for (b in bins) {
+      genes_in_bin <- gene_bin_map$gene[gene_bin_map$bin == b]
+      agg_mat[b, genes_in_bin] <- 1
+  }
+  
+  # bin x cell = (bin x gene) %*% (gene x cell)
+  bin_mat <- agg_mat %*% mat[gene_order, ]
+  # Result: sparse bin x cell matrix
+  return(bin_mat)
+}
+bin_mat <- bin_matrix(mat_sub, gene_bin_map)
+dim(bin_mat)
+
+
+```
+
+```{r}
+stable_counts_filtered <- bin_mat[, apply(bin_mat, 2, function(x) sum(x>0))>10] # filter cells with less than positive bins across
+dim(stable_counts_filtered)
+```
+```{r}
+library(fastCNVdata)
+library(fastCNV)
+HDBreast <- load_HDBreast()
+HDBreast <- annotations8umTo16um(HDBreast, referenceVar = "annots_8um")
+refmat <- GetAssayData(HDBreast, layer = "counts", assay = "Spatial.016um")
+gene_bin_map_ref <- gene_bin_map %>% filter(gene %in% rownames(refmat))
+temp <- names(which(HDBreast$projected_annots_8um == "NoTumor"))
+temp <- temp[temp %in% colnames(refmat)]
+stable_counts_ref <- refmat[gene_bin_map_ref$gene, sample(temp, 10000, replace = F) ]
+stable_counts_ref <- bin_matrix(stable_counts_ref, gene_bin_map_ref)
+colnames(stable_counts_ref) <- paste0("HDB_", colnames(stable_counts_ref))
+saveRDS(stable_counts_ref, "~/VisHD/stable_counts_ref.Rds")
+stable_counts_ref <- readRDS("~/VisHD/stable_counts_ref.Rds")
+```
+
+#### Parameters
+
+```{r}
+#0.01 by default. Usually set in range of 0.005-0.03. 0 = Poisson distributed data.
+nb_overdispersion <- 0.005
+#pseudo-count for vst or power transformation
+pseudo_count <- 0.5
+#0.4 by default. Usually set in range of 0.3 (high overdispersion) to 0.5 (low overdispersion). Setting higher than optimal can help with removing
+#technical variation associated with transposition efficiency when confounded with biological variation.
+lambda <- 0.4 #can also try estimate with find_lambda(stable_counts_filtered, nb_overdispersion, pseudo_count)
+discard_pcs <- c(1)
+npcs <- 25
+```
+
+#### Code
+
+```{r}
+loess_mean_var <- fit_sim_mean_var(stable_counts_filtered, nb_overdispersion, pseudo_count, lambda)
+
+stable_counts_filtered_norm <- normalise_counts(stable_counts_filtered, nb_overdispersion, pseudo_count, lambda)
+stable_counts_filtered_norm_cor <- correct_normalised_counts(stable_counts_filtered_norm, discard_pcs)
+
+norm_df <- data.frame(mean = rowMeans(stable_counts_filtered_norm_cor), var = rowVars(stable_counts_filtered_norm_cor))
+ggplot(norm_df, aes(x = mean, y = var)) + geom_point() + stat_function(fun = function(x){predict(loess_mean_var, x)})
+```
+
+```{r}
+atac_stable_total_filtered <- colSums(stable_counts_filtered)
+
+stable_counts_filtered_norm_pca <- get_pca(stable_counts_filtered_norm, npcs)
+
+stable_total_cor <- cor(stable_counts_filtered_norm_pca$x, sqrt(atac_stable_total_filtered))[,1]
+
+pca_df <- data.frame(pc = 1:npcs, stable_total_cor)
+
+ggplot(pca_df, aes(x = pc, y = stable_total_cor, fill = abs(stable_total_cor))) + geom_col() + 
+  ylim(c(-1,1)) + scale_x_continuous(breaks = 1:npcs) + scale_fill_gradient(low = "blue", high = "yellow", limits = c(0,1))
+```
+
+#### Parameters
+```{r}
+knn_k <- 20
+```
+
+
+#### Code
+
+```{r}
+set.seed(123)
+leiden_clusters <- iterative_cluster_sim(stable_counts_filtered, nb_overdispersion, pseudo_count, lambda, npcs, discard_pcs, knn_k, tolerance = 0.05, start = 0,iter.limit = 1)
+umap_embeddings <- get_umap(stable_counts_filtered_norm_pca$x, npcs, discard_pcs)
+cluster_outliers <- get_cluster_outliers(stable_counts_filtered_norm_pca$x, leiden_clusters, npcs, discard_pcs, knn_k, 0.2)
+
+cluster_df <- data.frame(umap_embeddings, cluster = leiden_clusters, stable_total = atac_stable_total_filtered,  is_outlier = cluster_outliers)
+ggplot(cluster_df, aes(x = UMAP_1, y= UMAP_2, color = cluster)) + geom_point()
+ggplot(cluster_df, aes(x = UMAP_1, y= UMAP_2, color = stable_total)) + geom_point() + scale_color_gradient(low = "blue", high = "yellow", trans = "log10")
+ggplot(cluster_df, aes(x = UMAP_1, y= UMAP_2, color = is_outlier)) + geom_point()
+```
+
+```{r}
+plot(rowMeans(stable_counts_filtered[,leiden_clusters == 1]) / rowMeans(stable_counts_filtered[,leiden_clusters == 2]) )
+```
+
+```{r}
+plot_copy_number(stable_counts_filtered, stable_counts_ref, leiden_clusters, stable_counts_filtered_norm_pca, discard_pcs, is_ref_female = T)
+```
+
+#### Parameters
+
+```{r}
+ref_cluster <- c(3, 5)
+exclude_clusters <- c(8)
+y_lim <- c(0,8)
+sf_start <- 0.7
+sf_stop <- 1.4
+sf_step <- 0.1
+```
+
+
+#### Code
+```{r}
+is_excluded <- cluster_outliers | leiden_clusters %in% exclude_clusters
+cn_fit_out <- fit_cn_clusters(stable_counts_filtered, leiden_clusters, ref_cluster, F, is_excluded, 1000, sf_start, sf_stop, sf_step, F, T)
+absolute_cn_list <- get_absolute_copy_number(stable_counts_filtered, leiden_clusters, ref_cluster, cn_fit_out$scale_factors, is_excluded, F)
+#for (i in seq_along(absolute_cn_list)){
+#  plot_absolute_cn(absolute_cn_list[[i]], names(absolute_cn_list)[i])
+#}
+plot_absolute_cn2(absolute_cn_list, y_lim = y_lim, exclude_clusters = c("all",exclude_clusters))
+```
+

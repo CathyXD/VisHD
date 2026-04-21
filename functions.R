@@ -688,3 +688,10 @@ plot_cnv_heatmap <- function(mat, labels, title = "CNV Subclusters",
   
   invisible(ht)
 }
+
+
+cellhighlight_imagedim <- function(srt, cond){
+  srt$highlight <- ifelse(cond, 1, 0)
+  p <- ImageDimPlot(srt, group.by = "highlight")
+  return(p)
+}

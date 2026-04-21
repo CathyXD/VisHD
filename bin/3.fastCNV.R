@@ -168,4 +168,26 @@ i = samples[arg]
 #                      pooledReference = T)
 
 
+# library(fastCNVdata,  lib.loc = "~/R_Library/4.5")
+# HDBreast <- load_HDBreast()
+# HDBreast <- annotations8umTo16um(HDBreast, referenceVar = "annots_8um")
+# ImageDimPlot(HDBreast, group.by = "projected_annots_8um")
+# HDBreast$tumour_normal <- HDBreast$projected_annots_8um
+# DefaultAssay(HDBreast) <- "Spatial.016um"
+# HDBreast[["Spatial.008um"]] <- NULL
+# 
+# normal_HDBreast <- subset(HDBreast, cells = colnames(HDBreast)[HDBreast$tumour_normal == "NoTumor" & HDBreast$nFeature_Spatial.016um>100])
+#normal_HDBreast <- qs_read("~/VisHD/HDBreast_normal.qs2")
+#merged_hd <- merge(
+#  x = srt,
+ # y = normal_HDBreast,
+#  add.cell.ids = c("LUT", "Breast")
+#)
 
+#merged_hd <- JoinLayers(merged_hdk)
+
+# srt$cnv_cutoff <- binarise_expression(srt$cnv_fraction, plot_out = "cnv_fraction_binarisation.png")
+# test <- as.data.frame.matrix(table(srt$cnv_clusters, srt$cnv_cutoff))
+# test <- apply(test, 1, function(x) x/sum(x))
+# ref <- names(which.max(test["0", ] ))
+# 

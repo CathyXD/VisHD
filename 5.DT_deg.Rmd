@@ -1,0 +1,116 @@
+---
+title: "Tumour signature aggregation"
+output: html_notebook
+---
+
+```{r setup}
+library(Seurat)
+library(qs, lib.loc = "~/R_Library/4.5")
+library(dplyr)
+library(data.table)
+library(ComplexHeatmap)
+library(patchwork)
+```
+
+```{r}
+paths <- system("realpath ~/VisHD/*/enrichlist_DTvsCBtumour.Rds", intern = T)
+names(paths) <-  sapply(strsplit(paths, split = "/"), '[', 5)
+
+```
+```{r}
+enrichlist <- lapply(paths, readRDS)
+
+enrichlist <-  lapply(enrichlist,lapply, lapply, function(x) x@result)
+enrichlist <- lapply(enrichlist, lapply, rbindlist)
+enrichlist <- lapply(enrichlist, rbindlist, idcol = "comp")
+enrichdf <- rbindlist(enrichlist, idcol = "sample", fill = T)
+head(enrichdf)
+```
+
+```{r fig.height=10, fig.width=7}
+enrichmat <- reshape2::dcast(data = enrichdf, sample~ID, value.var = "NES",  fun.aggregate = sum)
+head(enrichmat)
+rownames(enrichmat) <- enrichmat$sample
+enrichmat <- enrichmat[, -1]
+enrichmat <- t(enrichmat)
+enrichmat <- enrichmat[apply(enrichmat, 1, function(x) sum(x!=0)>1), ]
+pathtype <- sapply(strsplit(rownames(enrichmat), split = "_"), '[', 1) 
+Heatmap(enrichmat, 
+        name 
+        col =  circlize::colorRamp2(c(-2, 0, 6), c("blue", "white", "red")), 
+        show_row_names =  T, 
+        row_names_gp = gpar(fontsize = 10), 
+        row_split = pathtype)
+```
+
+```{r}
+paths <- system("realpath ~/VisHD/*/deg_DTvsCBtumour.Rds", intern = T)
+names(paths) <-  sapply(strsplit(paths, split = "/"), '[', 5)
+
+degs <- lapply(paths, readRDS)
+degs <- rbindlist(degs, idcol = "sample", fill = T)
+degssubset <- degs %>% filter(p_val_adj <0.05) %>% filter(abs(pct.1-pct.2) > 0.1) %>% filter(!grepl("MT-", gene))
+head(degs)
+```
+
+```{r fig.height=8, fig.width=5}
+degmat <- reshape2::dcast(data = degssubset, sample~gene, value.var = "avg_log2FC",  fun.aggregate = mean, fill = 0)
+head(degmat)
+rownames(degmat) <- degmat$sample
+degmat <- degmat[, -1]
+degmat <- t(degmat)
+degmat <- degmat[apply(degmat, 1, function(x) sum(x!=0)>1),]
+row_ha = rowAnnotation(recurrency = anno_barplot(apply(degmat, 1, function(x) sum(x!=0))), 
+                       direction = apply(degmat, 1, function(x) length(unique(sign(x[x != 0]))) <= 1), 
+                       col = list(direction = c("TRUE" = "seagreen", "FALSE" = "darkred")))
+Heatmap(degmat, 
+        name = "avg logFC",
+        col =  circlize::colorRamp2(c(min(degmat), 0, max(degmat)), c("blue", "grey95", "red")), 
+        show_row_names =  T, 
+        right_annotation = row_ha, 
+        row_names_side = "left", 
+        row_names_gp = gpar(fontsize = 10))
+```
+
+```{r}
+paths <- system("realpath ~/VisHD/LUT-*/", intern = T)
+```
+```{r}
+srt <- qread("/home/sweng/VisHD/LUT-245-07/banksy_srt.qs")
+DefaultAssay(srt) <- "SpaNorm"
+srt <- AddMetaData(srt, readRDS("/home/sweng/VisHD/LUT-245-07/tumour_anno.Rds"))
+ImageFeaturePlot(srt, "FOLH1") + ImageDimPlot(srt, group.by = "tumour_anno")
+```
+```{r}
+VlnPlot(srt, "FOLH1",  group.by = "tumour_full_subclone")+NoLegend()
+```
+```{r}
+selected_deg <- rownames(degmat)[apply(degmat, 1, function(x) length(unique(sign(x[x != 0]))) <= 1)]
+exprmat <- as.matrix(GetAssayData(srt, layers = "data"))
+submat <- exprmat[selected_deg, colnames(srt)[srt$tumour_anno == "Tumour"]]
+AR <- exprmat["AR", colnames(srt)[srt$tumour_anno == "Tumour"]]
+FOLH1 <- exprmat["FOLH1", colnames(srt)[srt$tumour_anno == "Tumour"]]     
+
+ARcor <- apply(submat, 1, function(x) data.frame(cor = cor(AR, x, method = "spearman"), pvalue = cor.test(AR, x, method = "spearman", exact = F)$p.value))
+names(ARcor) <- selected_deg
+ARcor <- rbindlist(ARcor, idcol = "DEG")
+ARcor$gene <- "AR"
+
+
+FOLH1cor <- apply(submat, 1, function(x) data.frame(cor = cor(FOLH1, x, method = "spearman"), pvalue = cor.test(FOLH1, x, method = "spearman", exact = F)$p.value))
+names(FOLH1cor) <- selected_deg
+FOLH1cor <- rbindlist(FOLH1cor, idcol = "DEG")
+FOLH1cor$gene <- "FOLH1"
+```
+
+```{r fig.height=20, fig.width=20}
+signs <- apply(degmat[selected_deg, ],1, function(x) unique(sign(x[x != 0])))
+ImageFeaturePlot(srt, selected_deg[signs == 1]) + plot_annotation(title = "positive in DT")
+ImageFeaturePlot(srt, selected_deg[signs == -1]) + plot_annotation(title = "positive in DT")
+```
+
+```{r}
+srt <- UpdateSeuratObject(srt)
+tumour_srt <- subset(srt, cells = colnames(srt)[srt$tumour_anno == "Tumour"])
+```
+

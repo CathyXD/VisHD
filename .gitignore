@@ -1,0 +1,27 @@
+# 1. Ignore everything
+*
+
+# 2. But don't ignore directories (so we can look inside them)
+!*/
+
+# 3. Explicitly include (track) your requested formats
+!*.R
+!*.Rmd
+!*.slurm
+!*.sh
+!*.html
+
+# 3. Now, un-ignore all .txt files in any directory
+!**/*.R
+!**/*.Rmd
+!**/*.html
+!**/*.sbatch
+!**/*.sh
+!**/*.slurm
+
+# 4. (Optional) If you want to keep the .gitignore itself tracked
+raw/*/**
+
+
+!.gitignore
+

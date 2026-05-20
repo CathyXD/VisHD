@@ -24,4 +24,5 @@ raw/*/**
 
 
 !.gitignore
+!CLAUDE.md
 

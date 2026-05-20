@@ -7,7 +7,7 @@
 #SBATCH --time=05:00:00
 #SBATCH --job-name=tumour_normal_split
 #SBATCH --array=3,6
-#SBATCH --output="slurmout/5.1.tumour_normal-%j-%a.out"
+#SBATCH --output="slurmout/4.1.normal_split-%j-%a.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --partition=work
@@ -38,4 +38,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/5.2.normal_split.R "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/4.1.normal_split.R "$SLURM_ARRAY_TASK_ID"

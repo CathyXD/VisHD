@@ -11,4 +11,4 @@
 #SBATCH --array=1-8
 
 module load ood_r/4.5.0
-Rscript ~/VisHD/4.tumour_normal_split.R "$SLURM_ARRAY_TASK_ID"
+Rscript ~/VisHD/4.1.tumour_normal_split.R "$SLURM_ARRAY_TASK_ID"

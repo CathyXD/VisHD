@@ -113,10 +113,10 @@ for (i in seq_along(samples)) {
     arch_idx_top_vec[s] <- paste0(s, "_A", top_info$arch_idx_top)
   }
 
-  # AnnData → Seurat (skip if cached .rds already exists)
+  # AnnData → Seurat (force conversion)
   if (file.exists(h5ad_f)) {
     srt_cache <- file.path(result_dir, "seurat_from_h5ad.rds")
-    if (file.exists(srt_cache)) {
+    if (TRUE) {
       message("Loading cached Seurat for ", s, " ...")
       seurat_list[[s]] <- readRDS(srt_cache)
     } else {
@@ -282,7 +282,7 @@ dev.off()
 
 # ── 8. Recurrent gene expression modules ─────────────────────────────────────
 # Cluster archetypes by expression; find consensus top genes per cluster
-k_modules = 2
+k_modules = 3
 hc         <- hclust(as.dist(1 - cor_expr), method = "ward.D2")
 arch_group <- cutree(hc, k = k_modules)
 

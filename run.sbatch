@@ -4,11 +4,11 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=150G
+#SBATCH --mem=200G
 #SBATCH --time=08:00:00
-#SBATCH --job-name=split
+#SBATCH --job-name=5.2
 #SBATCH --partition=work
-#SBATCH --output="slurmout/5.split-%j.out"
+#SBATCH --output="slurmout/5.2-%j.out"
 
 dir="${MYSCRATCH}"
 # Set the image and tag we want to use
@@ -36,4 +36,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/LUT-07single.R 
+  Rscript ~/VisHD/5.2.integrate_DESeq2_deg.R 

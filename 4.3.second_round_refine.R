@@ -1,7 +1,7 @@
 library(patchwork)
 library(infercnv)
 library(qs2)
-library(dendextend)
+library(dendextend, lib.loc = "~/R_Library/4.5")
 library(Seurat)
 library(ggplot2)
 library(qs, lib.loc = "~/R_Library/4.5")
@@ -88,6 +88,32 @@ bintocell <- function(srt_bin, sample_name){
   ggsave("png/tumour_anno_proportion2.png", width = 6, height = 4)
   return(srt_cell_filtered)
 }
+
+#LUT07
+setwd("~/VisHD/LUT-245-07")
+infercnvobj <- readRDS("bined_ouput/infercnv_subclone/preliminary.infercnv_obj")
+infercnv::plot_per_group(infercnvobj, on_observations = F, out_dir ="bined_ouput/infercnv_subclone/",  write_expr_matrix = F, save_objects =F, output_format = "pdf", k_obs_groups = 1)
+saveRDS(infercnvobj@tumor_subclusters$hc, "bined_ouput/infercnv_subclone/all_dendrogram.Rds")
+hctree <- infercnvobj@tumor_subclusters$hc$Normal
+tree <- cutree(hctree, k = 8, order_clusters_as_data = F)
+png("test.png")
+plot(hctree, labels = FALSE)
+rect.hclust(hctree, k = 8, border = c("red"))
+dev.off()
+
+table(tree)
+tumourcells <- names(tree[tree == 4])
+srt <- qs_read("bined_ouput/subclone_srt.qs2")
+srt$tumour_anno <- ifelse(colnames(srt) %in% tumourcells, "Tumour", srt$tumour_anno)
+srt$subclone <- ifelse(colnames(srt) %in% tumourcells, 1, srt$subclone)
+p = ImageDimPlot(srt, group.by = "tumour_anno", cols = c("Tumour" = "red", "Normal" = "grey90", "Removed" = "grey25")) + 
+  ImageDimPlot(srt, group.by = "subclone")
+p + plot_annotation(title = "LUT-245-07")
+ggsave("bined_ouput/subclone_anno2.png", plot = p,  width = 8, height = 3)
+
+srt_cell_filtered <- bintocell(srt, "LUT-245-07")
+qs_save(srt, "bined_ouput/subclone_srt.qs2")
+
 #LUT10
 setwd("~/VisHD/LUT-245-10")
 leiden_clusters <- readRDS("bined_ouput/leiden_clusters_10Mbp_iter2.Rds")
@@ -159,4 +185,29 @@ p = ImageDimPlot(srt, group.by = "tumour_anno", cols = c("Tumour" = "red", "Norm
 p + plot_annotation(title = "LUT-245-16")
 
 srt_cell_filtered <- bintocell(srt, "LUT-245-16")
+qs_save(srt, "bined_ouput/subclone_srt.qs2")
+
+#LUT20
+setwd("~/VisHD/LUT-245-20")
+infercnvobj <- readRDS("bined_ouput/infercnv_subclone/preliminary.infercnv_obj")
+infercnv::plot_per_group(infercnvobj, on_observations = F, out_dir ="bined_ouput/infercnv_subclone/",  write_expr_matrix = F, save_objects =F, output_format = "pdf", k_obs_groups = 1)
+saveRDS(infercnvobj@tumor_subclusters$hc, "bined_ouput/infercnv_subclone/all_dendrogram.Rds")
+hctree <- infercnvobj@tumor_subclusters$hc$Normal
+tree <- cutree(hctree, k = 8, order_clusters_as_data = F)
+png("test.png")
+plot(hctree, labels = FALSE)
+rect.hclust(hctree, k = 8, border = c("red"))
+dev.off()
+
+table(tree)
+tumourcells <- names(tree[tree == 4])
+srt <- qs_read("bined_ouput/subclone_srt.qs2")
+srt$tumour_anno <- ifelse(colnames(srt) %in% tumourcells, "Tumour", srt$tumour_anno)
+srt$subclone <- ifelse(colnames(srt) %in% tumourcells, 1, srt$subclone)
+p = ImageDimPlot(srt, group.by = "tumour_anno", cols = c("Tumour" = "red", "Normal" = "grey90", "Removed" = "grey25")) + 
+  ImageDimPlot(srt, group.by = "subclone")
+p + plot_annotation(title = "LUT-245-20")
+ggsave("bined_ouput/subclone_anno2.png", plot = p,  width = 8, height = 3)
+
+srt_cell_filtered <- bintocell(srt, "LUT-245-20")
 qs_save(srt, "bined_ouput/subclone_srt.qs2")

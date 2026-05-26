@@ -1,6 +1,6 @@
 #!/bin/bash --login
 #SBATCH --job-name=infercnv
-#SBATCH --output="slurmout/3.1.infercnv_subclone-%j-%a.out"
+#SBATCH --output="slurmout/3.2.infercnv_subclone-%j-%a.out"
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --mail-user=Sirui.Weng@petermac.org

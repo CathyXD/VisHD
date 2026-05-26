@@ -348,11 +348,13 @@ pathwayenrich_plot <- function(top_n, gsea_result, pvalue_show= F, plot = c("enr
   p[[1]] <- p[[1]] + theme(
     legend.position  = "bottom",
     legend.direction = "horizontal"
-  )+ guides(color = guide_legend(ncol =2))
+  )+ guides(color = guide_legend(ncol =1))
   
   # Reassemble with patchwork
   
-  patchwork::wrap_plots(p, ncol = 1)}
+  p <- patchwork::wrap_plots(p, ncol = 1)
+  return(p)
+  }
   
   if("network" %in% plot){
     p <- cnetplot(
@@ -370,7 +372,7 @@ pathwayenrich_plot <- function(top_n, gsea_result, pvalue_show= F, plot = c("enr
       ggtitle("GSEA Concept Network") +
       theme(plot.title = element_text(hjust = 0.5, face = "bold"))
     
-    print(p)
+    return(p)
   }
   .return_genesetname <- function(id){
     test <- unique(sapply(strsplit(id, split = "_"), '[', 1))

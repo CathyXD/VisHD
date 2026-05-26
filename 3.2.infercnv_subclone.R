@@ -27,6 +27,17 @@ srt <- qs_read("subclone_srt.qs2")
 # srt$subclone[!is.na(srt$subclone)] <- paste(srt$subclone[!is.na(srt$subclone)], "subclone")
 # ref_cluster <-  unique(srt$ATAClone_cluster[is.na(srt$subclone)])
 srt$subclone[is.na(srt$subclone)] <- "Normal"
+
+# Downsample Normal cells to avoid hclust timeout (~7h+ for 77k cells)
+normal_cells <- colnames(srt)[srt$subclone == "Normal"]
+max_normal   <- 5000
+if (length(normal_cells) > max_normal) {
+  set.seed(42)
+  keep_normal <- sample(normal_cells, max_normal)
+  srt <- srt[, c(colnames(srt)[srt$subclone != "Normal"], keep_normal)]
+  message("Downsampled Normal cells from ", length(normal_cells), " to ", max_normal)
+}
+
 gene_ord2 <- readRDS("~/VisHD/gene_ord2.Rds")
 generef <- readRDS("~/VisHD/proberef.Rds")
 generef <- rbind(generef[, 1:3], gene_ord2[setdiff(rownames(srt), rownames(generef)), ])
@@ -54,9 +65,9 @@ infercnvobject = infercnv::run(infercnvobject,
                                analysis_mode='cells',
                                cluster_by_groups= T,
                                cluster_references = T, 
-                               denoise=T,
-                               HMM=T,
-                               save_rds = T, 
+                               denoise=F,
+                               HMM=F,
+                               save_rds = F, 
                                plot_steps = F, 
                                write_phylo = T, 
                                write_expr_matrix = F,

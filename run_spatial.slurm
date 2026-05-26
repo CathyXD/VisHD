@@ -26,4 +26,4 @@ export SAMPLE_IDX=$SLURM_ARRAY_TASK_ID
 jupyter nbconvert --to notebook --execute \
   --ExecutePreprocessor.timeout=3600 \
   --output-dir "$outdir" \
-  "${MYSCRATCH}/VisHD/6.1archetypal_analysis_tumour.ipynb"
+  "${MYSCRATCH}/VisHD/6.1.archetypal_analysis_tumour.ipynb"

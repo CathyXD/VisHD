@@ -102,6 +102,8 @@ run_comparison <- function(cells, label) {
   list(deg = deg, enrich = enrich)
 }
 
+future::plan("multisession", workers = 4)
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 1.  Overall DT vs CB
 # ══════════════════════════════════════════════════════════════════════════════

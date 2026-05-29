@@ -5,10 +5,10 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=200G
-#SBATCH --time=08:00:00
-#SBATCH --job-name=5.2
+#SBATCH --time=09:00:00
+#SBATCH --job-name=integration
 #SBATCH --partition=work
-#SBATCH --output="slurmout/5.2-%j.out"
+#SBATCH --output="slurmout/7.1.integration-%j.out"
 
 dir="${MYSCRATCH}"
 # Set the image and tag we want to use
@@ -36,4 +36,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/5.2.integrate_DESeq2_deg.R 
+  Rscript ~/VisHD/7.1.integration_cells.R 

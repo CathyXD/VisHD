@@ -47,6 +47,7 @@ Scripts are numbered by their order of execution:
 | `5.1.tumour_normal_split.R` | Subset tumour cells, re-run SpaNorm, BANKSY, module scoring |
 | `5.DT_deg.Rmd` | Differential expression and pathway enrichment (interactive Rmd) |
 | `6.celltype_annotation.R` | Cell type annotation |
+| `7.1.integration_cells.R` | Merge raw counts from all 8 slides, run scPearsonPCA (with and without batch correction by `slide`), compute archetype + tumour/normal module scores, export to `.h5ad`; outputs to `integration/` |
 | `LUT-245-XX/4.refine_cnv.Rmd` | Per-sample interactive CNV refinement notebook |
 
 ## Data Layout
@@ -58,18 +59,21 @@ Scripts are numbered by their order of execution:
 │       ├── filtered_feature_cell_matrix.h5
 │       ├── graphclust_annotated_cell_segmentations.geojson
 │       └── nucleus_segmentations.geojson
-└── LUT-245-XX/                   # Per-sample analysis outputs
-    ├── raw_srt.qs                # Raw Seurat object
-    ├── spanorm_srt.qs            # After SpaNorm normalization
-    ├── banksy_srt.qs/qs2         # After BANKSY clustering
-    ├── tumour_anno_srt.qs2       # After tumour/normal annotation
-    ├── bined_ouput/              # 16µm binned Seurat objects
-    │   ├── srt.qs
-    │   └── srt_infercnv.qs2
-    ├── tumour/                   # Tumour-only re-analysis
-    │   ├── tumour_srt.qs2
-    │   └── vishd_counts.h5ad
-    └── category.csv              # CB (CellBiome) binary cell classification
+├── LUT-245-XX/                   # Per-sample analysis outputs
+│   ├── raw_srt.qs                # Raw Seurat object
+│   ├── spanorm_srt.qs            # After SpaNorm normalization
+│   ├── banksy_srt.qs/qs2         # After BANKSY clustering
+│   ├── tumour_anno_srt.qs2       # After tumour/normal annotation
+│   ├── bined_ouput/              # 16µm binned Seurat objects
+│   │   ├── srt.qs
+│   │   └── srt_infercnv.qs2
+│   ├── tumour/                   # Tumour-only re-analysis
+│   │   ├── tumour_srt.qs2
+│   │   └── vishd_counts.h5ad
+│   └── category.csv              # CB (CellBiome) binary cell classification
+└── integration/                  # Cross-sample integration outputs (7.1.integration_cells.R)
+    ├── integrated_pearson_srt.qs2  # Merged Seurat with pearsonpca/umap reductions
+    └── integrated_cells.h5ad       # AnnData export with spatial obsm
 ```
 
 `$HOME` inside the container maps to `$MYSCRATCH` on Setonix.
@@ -82,6 +86,10 @@ Scripts are numbered by their order of execution:
 - `tumour_anno`: `Tumour` / `Normal` / `Removed` (from `4.1refine_subclones.R`)
 - `ATAClone_cluster`: CNV-based clonal cluster labels
 - `subclone`: Manually curated integer subclone assignment
+- `slide`: Sample name (e.g. `LUT-245-07`); added during cross-sample merge in `7.1.integration_cells.R`
+- `x_centroid` / `y_centroid`: Spatial centroid coordinates (pixels) extracted via `GetTissueCoordinates(srt, which = "centroids")` and stored in `@meta.data` so they survive merge/export
+- `pearson_clusters`: Leiden clusters from unbatch-corrected scPearsonPCA graph
+- `pearson_clusters_batch`: Leiden clusters from batch-corrected scPearsonPCA graph
 
 **Two data resolutions run in parallel:**
 - **Cell-level** (`raw_srt.qs`): Single-cell segmented Visium HD data
@@ -111,11 +119,15 @@ Annotations are transferred from bins to cells using `transfer_visiumhd_to_cells
 
 Several packages are installed to `~/R_Library/4.5` (not the system library). Always load these with:
 ```r
-library(SpaNorm, lib.loc = "~/R_Library/4.5")
-library(leidenbase, lib.loc = "~/R_Library/4.5")
-library(UCell, lib.loc = "~/R_Library/4.5")
-library(anndataR, lib.loc = "~/R_Library/4.5")
+library(SpaNorm,      lib.loc = "~/R_Library/4.5")
+library(leidenbase,   lib.loc = "~/R_Library/4.5")
+library(UCell,        lib.loc = "~/R_Library/4.5")
+library(anndataR,     lib.loc = "~/R_Library/4.5")
+library(scPearsonPCA, lib.loc = "~/R_Library/4.5")
+library(qs,           lib.loc = "~/R_Library/4.5")
 ```
+
+Key `scPearsonPCA` functions: `sparse_quasipoisson_pca_seurat()` (no batch), `sparse_quasipoisson_pca_seurat_batch()` (batch by slide), `make_umap()`, `gene_frequency()`.
 
 ## File Formats
 

@@ -7,11 +7,12 @@ library(data.table)
 library(scPearsonPCA, lib.loc = "~/R_Library/4.5")
 library(qs,          lib.loc = "~/R_Library/4.5")
 library(qs2)
+source("~/VisHD/functions.R")  # filter_artefacts_knn
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-paths   <- system("realpath ~/VisHD/LUT-245-*/tumour_anno_srt.qs2", intern = TRUE)
-slides  <- basename(dirname(paths))
-out_dir <- path.expand("~/VisHD/integration")
+paths   <- system("realpath ~/VisHD/LUT-245-*/bined_ouput/srt.qs", intern = TRUE)
+slides  <- basename(dirname(dirname(paths)))
+out_dir <- path.expand("~/VisHD/1.integrate_raw_binned")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 pearson_path <- file.path(out_dir, "integrated_pearson_srt.qs2")
 
@@ -33,18 +34,23 @@ if (file.exists(pearson_path)) {
   cat("Loading precomputed integrated srt from:", pearson_path, "\n")
   srt <- qs_read(pearson_path)
 } else {
-  # ── Load and merge counts only ───────────────────────────────────────────
+  # ── Load, per-slide kNN artefact filter, then build merge-ready minis ────
   cat("Loading and merging", length(paths), "slides...\n")
   srt_list <- lapply(seq_along(paths), function(i) {
     cat("  Loading", slides[i], "\n")
-    srt_full <- qs_read(paths[i])
-    counts   <- GetAssayData(srt_full, assay = "Spatial", layer = "counts")
+    srt_full <- qread(paths[i])
+    n_before <- ncol(srt_full)
+    srt_full <- filter_artefacts_knn(srt_full, min_neighbours = 5)
+    cat("    ", slides[i], ": ", n_before, " -> ", ncol(srt_full),
+        " cells after kNN artefact filter\n", sep = "")
+
+    counts   <- GetAssayData(srt_full, assay = "Spatial.016um", layer = "counts")
     meta     <- srt_full@meta.data
     meta$slide <- slides[i]
     coords   <- GetTissueCoordinates(srt_full, which = "centroids")
     meta$x_centroid <- coords[rownames(meta), "x"]
     meta$y_centroid <- coords[rownames(meta), "y"]
-    srt_mini <- CreateSeuratObject(counts = counts, meta.data = meta, assay = "Spatial")
+    srt_mini <- CreateSeuratObject(counts = counts, meta.data = meta, assay = "Spatial.016um")
     rm(srt_full); gc()
     srt_mini
   })
@@ -52,7 +58,15 @@ if (file.exists(pearson_path)) {
   rm(srt_list); gc()
   cat("Merged:", ncol(srt), "cells\n")
 
-  DefaultAssay(srt) <- "Spatial"
+  DefaultAssay(srt) <- "Spatial.016um"
+  srt <- JoinLayers(srt, assay = "Spatial.016um")
+
+  # ── Post-merge QC filter ────────────────────────────────────────────────
+  keep  <- srt$nFeature_Spatial.016um > 20 &
+           srt$nCount_Spatial.016um   > 50
+  srt <- subset(srt, cells = colnames(srt)[which(keep)])
+  cat("After QC filter (nFeature>20, nCount>50):", ncol(srt), "bins\n")
+
   srt <- NormalizeData(srt)
 
   srt <- AddModuleScore(srt, features = archetype_module, name = "module_score")
@@ -60,7 +74,7 @@ if (file.exists(pearson_path)) {
   colnames(srt@meta.data)[match(old_cols, colnames(srt@meta.data))] <- module_names
 
   # ── Pearson residual PCA ─────────────────────────────────────────────────
-  counts_mat <- GetAssayData(srt, assay = "Spatial", layer = "counts")
+  counts_mat <- GetAssayData(srt, assay = "Spatial.016um", layer = "counts")
   tc         <- Matrix::colSums(counts_mat)
   srt        <- FindVariableFeatures(srt, nfeatures = 5000)
   hvgs       <- VariableFeatures(srt)
@@ -120,7 +134,7 @@ if (!"tumour_score" %in% colnames(srt@meta.data)) {
 }
 
 # ── QC plots ───────────────────────────────────────────────────────────────
-qc_vars <- c("nCount_Spatial", "nFeature_Spatial")
+qc_vars <- c("nCount_Spatial.016um", "nFeature_Spatial.016um")
 
 qc_fp <- wrap_plots(
   lapply(qc_vars, function(v)
@@ -172,26 +186,29 @@ ggsave(file.path(out_dir, "1b_FeaturePlot_genes_batch.png"),
 
 # ── Cluster DimPlots ───────────────────────────────────────────────────────
 dp <- DimPlot(srt, reduction = "pearsonumap",
-              group.by = "pearson_clusters", label = TRUE, label.size = 3) +
+              group.by = "pearson_clusters", label = TRUE, label.size = 3,
+              cols = "polychrome") +
   ggtitle("Integrated — clusters (no batch)") +
   theme(legend.key.size = unit(0.4, "cm"))
 ggsave(file.path(out_dir, "2a_DimPlot_clusters.png"), dp,
        width = 6, height = 5, dpi = 400)
 
 dp_batch <- DimPlot(srt, reduction = "pearsonbatchumap",
-                    group.by = "pearson_clusters_batch", label = TRUE, label.size = 3) +
+                    group.by = "pearson_clusters_batch", label = TRUE, label.size = 3,
+                    cols = "polychrome") +
   ggtitle("Integrated — clusters (batch corrected)") +
   theme(legend.key.size = unit(0.4, "cm"))
 ggsave(file.path(out_dir, "2b_DimPlot_clusters_batch.png"), dp_batch,
        width = 6, height = 5, dpi = 400)
 
 # ── Slide layout: UMAP (no batch) + UMAP (batch corrected) ────────────────
-dp_s <- DimPlot(srt, reduction = "pearsonumap", group.by = "slide", label = FALSE) +
+dp_s <- DimPlot(srt, reduction = "pearsonumap", group.by = "slide", label = FALSE,
+                cols = "polychrome") +
   ggtitle("UMAP (no batch)") +
   theme(legend.key.size = unit(0.3, "cm"), plot.title = element_text(size = 9))
 
 dp_s_batch <- DimPlot(srt, reduction = "pearsonbatchumap", group.by = "slide",
-                      label = FALSE) +
+                      label = FALSE, cols = "polychrome") +
   ggtitle("UMAP (batch corrected)") +
   theme(legend.key.size = unit(0.3, "cm"), plot.title = element_text(size = 9))
 
@@ -291,8 +308,8 @@ h5ad_path <- file.path(out_dir, "integrated_cells.h5ad")
 if (!file.exists(h5ad_path)) {
   cat("Exporting to AnnData:", h5ad_path, "\n")
 
-  counts_mat <- t(GetAssayData(srt, assay = "Spatial", layer = "counts"))
-  data_mat   <- t(GetAssayData(srt, assay = "Spatial", layer = "data"))
+  counts_mat <- t(GetAssayData(srt, assay = "Spatial.016um", layer = "counts"))
+  data_mat   <- t(GetAssayData(srt, assay = "Spatial.016um", layer = "data"))
 
   spatial_coords <- as.matrix(srt@meta.data[, c("x_centroid", "y_centroid")])
 
@@ -313,5 +330,16 @@ if (!file.exists(h5ad_path)) {
 } else {
   cat("AnnData already exists, skipping:", h5ad_path, "\n")
 }
+
+# ── Subsample 30,000 bins and save ────────────────────────────────────────
+n_total <- ncol(srt)
+cat("Total bins:", n_total, "\n")
+set.seed(1)
+n_sub  <- min(30000, n_total)
+sub_cells <- sample(colnames(srt), n_sub)
+srt_sub   <- subset(srt, cells = sub_cells)
+sub_path  <- file.path(out_dir, "integrated_pearson_srt_sub30k.qs2")
+qs_save(srt_sub, sub_path)
+cat("Subsampled", n_sub, "bins saved to:", sub_path, "\n")
 
 cat("Done. Outputs in", out_dir, "\n")

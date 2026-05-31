@@ -4,6 +4,7 @@ library(ggplot2)
 library(qs2)
 library(readxl)
 library(purrr)
+library(scPearsonPCA, lib.loc = "~/R_Library/4.5")
 source("~/VisHD/functions.R")
 
 # Read in gene sets ==========================
@@ -29,12 +30,45 @@ i = samples[arg]
 cat("working at", path, "\n")
 
 
-srt <- qs_read("tumour_anno_srt.qs2")
-srt <- do.spanorm(srt)
+out_qs <- "tumour_anno_srt_with_public_signatures.qs2"
+scores_present <- file.exists(out_qs)
+if (scores_present) {
+  cat("Loading existing object:", out_qs, "\n")
+  srt <- qs_read(out_qs)
+} else {
+  srt <- qs_read("tumour_anno_srt.qs2")
+  srt <- do.spanorm(srt)
+}
 
-p <- DimPlot(srt, group.by = "category", cols = "polychrome") + DimPlot(srt,  group.by = "tumour_anno", cols = c("Tumour" = "red", "Normal" = "grey90", "Removed" = "grey25")) 
+# ── Pearson residual PCA + UMAP ──────────────────────────────────────────────
+if (!"pearsonumap" %in% Reductions(srt)) {
+  counts_mat <- GetAssayData(srt, assay = "Spatial", layer = "counts")
+  tc <- Matrix::colSums(counts_mat)
+  srt <- FindVariableFeatures(srt, nfeatures = 5000)
+  hvgs <- VariableFeatures(srt)
+  pcaobj <- sparse_quasipoisson_pca_seurat(
+    counts_mat[hvgs, ],
+    totalcounts = tc,
+    grate       = gene_frequency(counts_mat)[hvgs],
+    scale.max   = 10,
+    do.scale    = TRUE,
+    do.center   = TRUE
+  )
+  umapobj <- make_umap(pcaobj)
+  srt[["pearsonpca"]]   <- pcaobj$reduction.data
+  srt[["pearsonumap"]]  <- umapobj$ump
+  srt[["pearsongraph"]] <- Seurat::as.Graph(umapobj$grph)
+  srt <- FindClusters(srt, graph = "pearsongraph")
+  srt@meta.data$pearson_clusters <- srt@meta.data$seurat_clusters
+}
+
+dir.create("png/public_signatures", showWarnings = FALSE, recursive = TRUE)
+
+p <- DimPlot(srt, group.by = "category", cols = "polychrome") + DimPlot(srt,  group.by = "tumour_anno", cols = c("Tumour" = "red", "Normal" = "grey90", "Removed" = "grey25"))
+p_pearson <- DimPlot(srt, group.by = "category", cols = "polychrome", reduction = "pearsonumap") + DimPlot(srt,  group.by = "tumour_anno", cols = c("Tumour" = "red", "Normal" = "grey90", "Removed" = "grey25"), reduction = "pearsonumap")
 p2 <- ImageDimPlot(srt, group.by = "category", cols = "polychrome") + ImageDimPlot(srt,  group.by = "tumour_anno", cols = c("Tumour" = "red", "Normal" = "grey90", "Removed" = "grey25"))
 ggsave(plot = p/p2, "png/public_signatures/category_tumouranno.png", width = 6, height = 8, dpi = 200)
+ggsave(plot = p_pearson, "png/public_signatures/category_tumouranno_pearsonumap.png", width = 12, height = 4, dpi = 200)
 # ── Output directories ────────────────────────────────────────────────────────
 out_fp  <- file.path(path, "png", "public_signatures", "FeaturePlot")
 out_ifp <- file.path(path, "png", "public_signatures", "ImageFeaturePlot")
@@ -44,7 +78,7 @@ dir.create(out_ifp, showWarnings = FALSE, recursive = TRUE)
 # ── Helper: score one parent group and save FeaturePlot + ImageFeaturePlot ───
 # gene_sets : named list of character vectors (one vector per set)
 # parent_name : string used as page title and filename prefix
-plot_module_group <- function(srt, gene_sets, parent_name, out_fp, out_ifp, ncol = 3) {
+plot_module_group <- function(srt, gene_sets, parent_name, out_fp, out_ifp, ncol = 3, add_scores = TRUE) {
   # Drop sets with fewer than 3 genes present in the object
   gene_sets <- Filter(function(g) length(intersect(g, rownames(srt))) >= 3, gene_sets)
   if (length(gene_sets) == 0) {
@@ -52,15 +86,18 @@ plot_module_group <- function(srt, gene_sets, parent_name, out_fp, out_ifp, ncol
     return(invisible(srt))
   }
 
-  # Unique internal prefix avoids column collisions across parent groups
-  prefix <- paste0(".MS.", gsub("[^A-Za-z0-9]", ".", parent_name), ".")
-  srt <- AddModuleScore(srt, features = gene_sets, name = prefix)
-
-  # Rename numbered columns → "ParentName | SetName" for uniqueness
-  raw_cols  <- paste0(prefix, seq_along(gene_sets))
   col_labels <- paste0(parent_name, " | ", names(gene_sets))
-  idx <- match(raw_cols, colnames(srt@meta.data))
-  colnames(srt@meta.data)[idx] <- col_labels
+
+  if (add_scores) {
+    # Unique internal prefix avoids column collisions across parent groups
+    prefix <- paste0(".MS.", gsub("[^A-Za-z0-9]", ".", parent_name), ".")
+    srt <- AddModuleScore(srt, features = gene_sets, name = prefix)
+
+    # Rename numbered columns → "ParentName | SetName" for uniqueness
+    raw_cols  <- paste0(prefix, seq_along(gene_sets))
+    idx <- match(raw_cols, colnames(srt@meta.data))
+    colnames(srt@meta.data)[idx] <- col_labels
+  }
 
   # Paginate: max 20 panels per page
   max_per_page <- 20
@@ -70,25 +107,31 @@ plot_module_group <- function(srt, gene_sets, parent_name, out_fp, out_ifp, ncol
     feats     <- pages[[pg]]
     titles    <- sub(paste0(parent_name, " | "), "", feats, fixed = TRUE)
     pg_suffix <- if (length(pages) > 1) paste0("_p", pg) else ""
-    fname     <- paste0(gsub("[^A-Za-z0-9_-]", "_", parent_name), pg_suffix, ".png")
+    base_name <- gsub("[^A-Za-z0-9_-]", "_", parent_name)
+    fname     <- paste0(base_name, pg_suffix, ".png")
     n_rows    <- ceiling(length(feats) / ncol)
 
-    # FeaturePlot page
-    fp_list <- mapply(function(feat, ttl) {
-      FeaturePlot(srt, feat) +
-        scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred", name = ttl) +
-        ggtitle(ttl) +
-        theme(plot.title = element_text(size = 9), legend.position = "right")
-    }, feats, titles, SIMPLIFY = FALSE)
+    # FeaturePlot pages — one per reduction
+    for (red in c("umap", "pearsonumap")) {
+      if (!red %in% Reductions(srt)) next
+      fp_list <- mapply(function(feat, ttl) {
+        FeaturePlot(srt, feat, reduction = red) +
+          scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred", name = ttl) +
+          ggtitle(ttl) +
+          theme(plot.title = element_text(size = 9), legend.position = "right")
+      }, feats, titles, SIMPLIFY = FALSE)
 
-    page_fp <- wrap_plots(fp_list, ncol = ncol) +
-      plot_annotation(
-        title = parent_name,
-        theme = theme(plot.title = element_text(size = 14, face = "bold"))
-      )
-    ggsave(file.path(out_fp, fname), plot = page_fp,
-           width = ncol * 4, height = n_rows * 3.5 + 0.8,
-           dpi = 200, limitsize = FALSE)
+      page_fp <- wrap_plots(fp_list, ncol = ncol) +
+        plot_annotation(
+          title = paste0(parent_name, " (", red, ")"),
+          theme = theme(plot.title = element_text(size = 14, face = "bold"))
+        )
+      red_suffix <- if (red == "pearsonumap") "_pearsonumap" else ""
+      fname_red  <- paste0(base_name, pg_suffix, red_suffix, ".png")
+      ggsave(file.path(out_fp, fname_red), plot = page_fp,
+             width = ncol * 4, height = n_rows * 3.5 + 0.8,
+             dpi = 200, limitsize = FALSE)
+    }
 
     # ImageFeaturePlot page
     ifp_list <- mapply(function(feat, ttl) {
@@ -113,11 +156,11 @@ plot_module_group <- function(srt, gene_sets, parent_name, out_fp, out_ifp, ncol
 }
 
 # ── 1. Archetype modules (flat named list → one page) ────────────────────────
-srt <- plot_module_group(srt, archetype_module, "Archetype", out_fp, out_ifp)
+srt <- plot_module_group(srt, archetype_module, "Archetype", out_fp, out_ifp, add_scores = !scores_present)
 
 # ── 2. Meta-programs (nested: sheet → programs; one page per sheet) ───────────
 for (sheet in names(meta_programs)) {
-  srt <- plot_module_group(srt, meta_programs[[sheet]], sheet, out_fp, out_ifp)
+  srt <- plot_module_group(srt, meta_programs[[sheet]], sheet, out_fp, out_ifp, add_scores = !scores_present)
 }
 
 # ── 3. Public gene sets 2023 (auto-detect flat vs nested) ────────────────────
@@ -126,10 +169,10 @@ for (sheet in names(meta_programs)) {
 is_nested <- is.list(genesets[[1]]) && !is.character(genesets[[1]])
 if (is_nested) {
   for (parent in names(genesets)) {
-    srt <- plot_module_group(srt, genesets[[parent]], parent, out_fp, out_ifp)
+    srt <- plot_module_group(srt, genesets[[parent]], parent, out_fp, out_ifp, add_scores = !scores_present)
   }
 } else {
-  srt <- plot_module_group(srt, genesets, "PublicSignatures2023", out_fp, out_ifp)
+  srt <- plot_module_group(srt, genesets, "PublicSignatures2023", out_fp, out_ifp, add_scores = !scores_present)
 }
 
 message("\nAll module score plots saved to:\n  ", out_fp, "\n  ", out_ifp)

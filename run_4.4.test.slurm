@@ -2,7 +2,7 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=160G
+#SBATCH --mem=100G
 #SBATCH --time=03:00:00
 #SBATCH --job-name=pubsig_test
 #SBATCH --array=1-8

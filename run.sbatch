@@ -6,9 +6,9 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=200G
 #SBATCH --time=09:00:00
-#SBATCH --job-name=integration
+#SBATCH --job-name=integrate_raw_binned
 #SBATCH --partition=work
-#SBATCH --output="slurmout/7.1.integration-%j.out"
+#SBATCH --output="slurmout/1.integrate_raw_binned-%j.out"
 
 dir="${MYSCRATCH}"
 # Set the image and tag we want to use
@@ -36,4 +36,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/7.1.integration_cells.R 
+  Rscript ~/VisHD/1.integrate_raw_binned.R

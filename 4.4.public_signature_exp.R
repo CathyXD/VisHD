@@ -42,24 +42,7 @@ if (scores_present) {
 
 # ── Pearson residual PCA + UMAP ──────────────────────────────────────────────
 if (!"pearsonumap" %in% Reductions(srt)) {
-  counts_mat <- GetAssayData(srt, assay = "Spatial", layer = "counts")
-  tc <- Matrix::colSums(counts_mat)
-  srt <- FindVariableFeatures(srt, nfeatures = 5000)
-  hvgs <- VariableFeatures(srt)
-  pcaobj <- sparse_quasipoisson_pca_seurat(
-    counts_mat[hvgs, ],
-    totalcounts = tc,
-    grate       = gene_frequency(counts_mat)[hvgs],
-    scale.max   = 10,
-    do.scale    = TRUE,
-    do.center   = TRUE
-  )
-  umapobj <- make_umap(pcaobj)
-  srt[["pearsonpca"]]   <- pcaobj$reduction.data
-  srt[["pearsonumap"]]  <- umapobj$ump
-  srt[["pearsongraph"]] <- Seurat::as.Graph(umapobj$grph)
-  srt <- FindClusters(srt, graph = "pearsongraph")
-  srt@meta.data$pearson_clusters <- srt@meta.data$seurat_clusters
+  srt <- do.pearson_pca(srt)
 }
 
 dir.create("png/public_signatures", showWarnings = FALSE, recursive = TRUE)

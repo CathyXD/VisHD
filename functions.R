@@ -65,7 +65,7 @@ createSPEObject <- function(countMat,
   return(data_spe)
 }
 
-do.spanorm <- function(srt){
+do.spanorm <- function(srt, outdir = ""){
   require(SpaNorm, lib.loc = "~/R_Library/4.5")
   require(leidenbase,  lib.loc = "~/R_Library/4.5")
   countMat <- GetAssayData(srt, assay = "Spatial", layer = "counts")
@@ -76,7 +76,7 @@ do.spanorm <- function(srt){
   spe <- createSPEObject(countMat, spatial_locs= spatial_coord, cell_metadata = spatial_coord, normalize = FALSE)
   spe <- SpaNorm(spe, df.tps = 4, sample.p = 0.25, gene.model = "nb")
   spe <- SpaNormSVG(spe)
-  saveRDS(rowData(spe), "SVGs.Rds")
+  saveRDS(rowData(spe), file.path(outdir, "SVGs.Rds"))
   spe <- SpaNormPCA(spe, ncomponents = 30, svg.fdr = 0.2, nsvgs = Inf)
   pca_embeddings <- reducedDim(spe, "PCA")
   rownames(pca_embeddings) <- colnames(srt)
@@ -94,6 +94,82 @@ do.spanorm <- function(srt){
   srt <- srt %>% RunUMAP(dims = 1:20) %>% 
     FindNeighbors(reduction = "pca", dims = 1:20) %>% 
     FindClusters(resolution = 1,algorithm = 4)
+}
+
+do.pearson_pca <- function(srt,
+                           batch_variable   = NULL,
+                           nfeatures        = 5000,
+                           assay            = "Spatial",
+                           find_hvgs        = NULL,
+                           reduction_prefix = NULL,
+                           clusters_col     = NULL) {
+  require(scPearsonPCA, lib.loc = "~/R_Library/4.5")
+  require(Seurat)
+  require(data.table)
+
+  batched <- !is.null(batch_variable)
+  if (is.null(reduction_prefix)) {
+    reduction_prefix <- if (batched) "pearsonbatch" else "pearson"
+  }
+  if (is.null(clusters_col)) {
+    clusters_col <- if (batched) "pearson_clusters_batch" else "pearson_clusters"
+  }
+
+  counts_mat <- GetAssayData(srt, assay = assay, layer = "counts")
+  tc         <- Matrix::colSums(counts_mat)
+
+  # Auto-skip FindVariableFeatures if VFs already exist in `assay`; explicit
+  # find_hvgs = TRUE/FALSE overrides that decision.
+  existing_hvgs <- tryCatch(VariableFeatures(srt, assay = assay),
+                            error = function(e) character(0))
+  if (is.null(find_hvgs)) find_hvgs <- length(existing_hvgs) == 0
+  if (find_hvgs) {
+    srt  <- FindVariableFeatures(srt, nfeatures = nfeatures, assay = assay)
+    hvgs <- VariableFeatures(srt, assay = assay)
+  } else {
+    if (length(existing_hvgs) == 0) {
+      stop(sprintf("find_hvgs = FALSE but no VariableFeatures set on assay '%s'", assay))
+    }
+    hvgs <- existing_hvgs
+  }
+
+  if (batched) {
+    if (!batch_variable %in% colnames(srt@meta.data)) {
+      stop(sprintf("batch_variable '%s' not found in srt@meta.data", batch_variable))
+    }
+    srt@meta.data$cell_ID <- rownames(srt@meta.data)
+    obs <- data.table(srt@meta.data)[, c("cell_ID", batch_variable), with = FALSE]
+
+    pcaobj <- sparse_quasipoisson_pca_seurat_batch(
+      counts_mat[hvgs, ],
+      totalcounts    = tc,
+      grate          = gene_frequency(counts_mat, obs = obs,
+                                      cellid_colname = "cell_ID",
+                                      batch_variable = batch_variable)[hvgs, ],
+      obs            = obs,
+      batch_variable = batch_variable,
+      cellid_colname = "cell_ID",
+      scale.max      = 10, do.scale = TRUE, do.center = TRUE
+    )
+  } else {
+    pcaobj <- sparse_quasipoisson_pca_seurat(
+      counts_mat[hvgs, ],
+      totalcounts = tc,
+      grate       = gene_frequency(counts_mat)[hvgs],
+      scale.max   = 10, do.scale = TRUE, do.center = TRUE
+    )
+  }
+
+  umapobj <- make_umap(pcaobj)
+
+  srt[[paste0(reduction_prefix, "pca")]]   <- pcaobj$reduction.data
+  srt[[paste0(reduction_prefix, "umap")]]  <- umapobj$ump
+  srt[[paste0(reduction_prefix, "graph")]] <- Seurat::as.Graph(umapobj$grph)
+
+  srt <- FindClusters(srt, graph = paste0(reduction_prefix, "graph"))
+  srt@meta.data[[clusters_col]] <- srt@meta.data$seurat_clusters
+
+  srt
 }
 
 do.banksy <- function(srt){

@@ -7,8 +7,54 @@ library(qs2)
 library(leidenbase, lib.loc = "~/R_Library/4.5")
 library(UCell, lib.loc = "~/R_Library/4.5")
 library(ggplot2)
+library(readxl)
+library(purrr)
+library(patchwork)
+
+# Gavish et al. meta-programs by cell type (nested: sheet → program → genes)
+meta_xlsx     <- "~/VisHD/public_signature/meta_programs_2025-01-29.xlsx"
+sheetname     <- excel_sheets(meta_xlsx)
+meta_programs <- set_names(sheetname, sheetname) |>
+  map(~ read_excel(meta_xlsx, sheet = .x, col_names = TRUE)) |>
+  map(~ map(.x, ~ as.character(na.omit(.x))))
+
+# Score every program in `meta_programs` onto `obj`, then save one FeaturePlot
+# PNG per sheet (one panel per program) for each available reduction.
+score_meta_programs <- function(obj, meta_programs, out_dir,
+                                reductions = c("umap", "pearsonumap"),
+                                tag = "") {
+  for (sheet in names(meta_programs)) {
+    progs <- Filter(function(g) length(intersect(g, rownames(obj))) >= 3,
+                    meta_programs[[sheet]])
+    if (length(progs) == 0) next
+
+    pref <- paste0(".meta.", make.names(sheet), ".")
+    obj  <- AddModuleScore(obj, features = progs, name = pref)
+    raw  <- paste0(pref, seq_along(progs))
+    cols <- paste0(sheet, " | ", names(progs))
+    colnames(obj@meta.data)[match(raw, colnames(obj@meta.data))] <- cols
+
+    ncol_g <- min(3, length(cols))
+    nrow_g <- ceiling(length(cols) / ncol_g)
+    base   <- make.names(sheet)
+
+    for (red in intersect(reductions, Reductions(obj))) {
+      red_suffix <- if (red == "umap") "" else paste0("_", red)
+      g <- FeaturePlot(obj, cols, ncol = ncol_g, reduction = red) &
+        scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred")
+      ggsave(plot = g,
+             file.path(out_dir, paste0("meta_", base, tag, red_suffix, ".png")),
+             width = ncol_g * 4, height = nrow_g * 3.5,
+             dpi = 200, limitsize = FALSE)
+    }
+  }
+  obj
+}
 
 args <- commandArgs(trailingOnly = TRUE)
+if (length(args) == 0 || is.na(suppressWarnings(as.numeric(args[1])))) {
+  stop("Usage: Rscript 4.1.tumour_normal_split.R <sample-index>")
+}
 arg <- as.numeric(args[1])
 
 
@@ -19,7 +65,7 @@ paths <- system("realpath ~/VisHD/LUT-245-*/", intern = T)
 # Select the specific sample directory based on the command line argument
 path <- paths[arg]
 setwd(path)
-samples <- sapply(strsplit(paths, split = "/"), '[', 5)
+samples <- basename(paths)
 names(paths) <- samples
 i = samples[arg]
 cat("working at", path, "\n")
@@ -34,21 +80,24 @@ if (!file.exists("tumour")){
 }
 setwd("tumour")
 tumour_srt <- do.spanorm(tumour_srt)
-#tumour_srt <- tumour_srt %>% RunUMAP(dims = 1:20) %>% 
-#  FindNeighbors(reduction = "pca", dims = 1:20) %>% 
- 
+tumour_srt <- do.pearson_pca(tumour_srt)
+
  tumour_srt <- CellCycleScoring(tumour_srt, s.features = cc.genes$s.genes, g2m.features = cc.genes$g2m.genes, set.ident = F)
  FeaturePlot(tumour_srt, c("G2M.Score", "S.Score"))
  tumour_srt <- tumour_srt %>% FindClusters(resolution = 0.8,algorithm = 4)
 
 spatial_plot(tumour_srt, outdir = "png/", name = "spanorm")
 
-g <- DimPlot(tumour_srt, group.by= "category")+DimPlot(tumour_srt, group.by= "ATAClone_cluster", cols = "polychrome") 
-g2 <-ImageDimPlot(tumour_srt, group.by= "category")+ImageDimPlot(tumour_srt, group.by= "ATAClone_cluster", cols = "polychrome") 
+g <- DimPlot(tumour_srt, group.by= "category")+DimPlot(tumour_srt, group.by= "ATAClone_cluster", cols = "polychrome")
+g2 <-ImageDimPlot(tumour_srt, group.by= "category")+ImageDimPlot(tumour_srt, group.by= "ATAClone_cluster", cols = "polychrome")
 ggsave(plot = g/g2, "png/spanorm_category_subclone.png", width = 10, height = 10, dpi = 350, create.dir =T)
 
+g_p <- DimPlot(tumour_srt, group.by= "category", reduction = "pearsonumap") +
+  DimPlot(tumour_srt, group.by= "ATAClone_cluster", cols = "polychrome", reduction = "pearsonumap")
+ggsave(plot = g_p, "png/pearson_category_subclone.png", width = 10, height = 5, dpi = 350, create.dir = T)
+
 # Load Gene Signatures
-clean_module <- readRDS("~/VisHD/clean_module.Rds")
+clean_module <- readRDS("~/VisHD/public_signature/clean_module.Rds")
 names(clean_module) <- c("AR", "Inflammation", "NE1", "NE2", "Cycling", "Glycolysis") # Renaming tumour modules
 
 tumour_srt <- AddModuleScore(tumour_srt, features = clean_module, name = "Module")
@@ -56,6 +105,13 @@ colnames(tumour_srt@meta.data)[grep("Module", fixed=T, colnames(tumour_srt@meta.
 
 g <- FeaturePlot(tumour_srt, paste(names(clean_module), "Module"), ncol = 3)&scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred")
 ggsave(plot = g, "png/archetype_module_exp.pdf", width = 9 , height = 6)
+
+g_p <- FeaturePlot(tumour_srt, paste(names(clean_module), "Module"), ncol = 3, reduction = "pearsonumap") &
+  scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred")
+ggsave(plot = g_p, "png/pearson_archetype_module_exp.pdf", width = 9, height = 6)
+
+# Gavish meta-programs (one PNG per cell-type sheet, per reduction)
+tumour_srt <- score_meta_programs(tumour_srt, meta_programs, out_dir = "png")
 
 cat("save object \n")
 qs_save(tumour_srt, "tumour_srt.qs2")
@@ -72,7 +128,7 @@ spatial_plot(tumour_srt, "png/", "Bansky_lam0.2")
 cat("BANKSY DONE \n")
 srt2anndata(tumour_srt, save_name = 'tumour')
 
-SVGs <- readRDS("~/VisHD/LUT-245-07/tumour/SVGs.Rds")
+SVGs <- readRDS("SVGs.Rds")
 f <- FeaturePlot(tumour_srt, as.data.frame(SVGs) %>% filter(svg.fdr <0.05) %>% arrange(desc(svg.F)) %>% filter(!grepl("MT-", symbol)) %>% dplyr::slice(1:20) %>% pull(symbol))
 ggsave(plot = f, width = 15, height = 12, "png/SVG_Featureplot.png")
 f <- ImageFeaturePlot(tumour_srt, as.data.frame(SVGs) %>% filter(svg.fdr <0.05) %>% arrange(desc(svg.F)) %>% filter(!grepl("MT-", symbol)) %>% dplyr::slice(1:20) %>% pull(symbol))
@@ -83,8 +139,11 @@ SVEC_marker <-  c("SEMG1", "SEMG2", "MUC6", "PGC", "CYP4F8", "CLU", "PDK4", "SLP
 test <- FeaturePlot(tumour_srt, SVEC_marker, reduction = "banksy0.2.umap")
   ggsave(plot = test, "png/SVEC_marker.png", width = 12, height= 12)
 
+test_p <- FeaturePlot(tumour_srt, SVEC_marker, reduction = "pearsonumap")
+ggsave(plot = test_p, "png/pearson_SVEC_marker.png", width = 12, height = 12)
+
 cat("===============Start DEG===================")
-DEG <- FindAllMarkers(tumour_srt, test.used = "MAST")
+DEG <- FindAllMarkers(tumour_srt, test.use = "MAST")
 saveRDS(DEG, "deg_spanorm.Rds")
   ## pathway enrichment
   Hall <- readRDS("~/VisHD/Hall.Rds")
@@ -143,6 +202,7 @@ setwd("normal")
 
 tumour_srt <- subset(srt_cell_filtered, cells = colnames(srt_cell_filtered)[srt_cell_filtered$tumour_anno == "Normal"])
 tumour_srt <- do.spanorm(tumour_srt)
+tumour_srt <- do.pearson_pca(tumour_srt)
 tumour_srt <- tumour_srt %>% FindClusters(resolution = 0.8,algorithm = 4)
 spatial_plot(tumour_srt, outdir = "png/", name = "spanorm")
 qs_save(tumour_srt, "tumour_srt.qs2")
@@ -160,7 +220,7 @@ spatial_plot(tumour_srt, "png/", "Bansky_lam0.2")
 cat("BANKSY DONE \n")
 
 DefaultAssay(tumour_srt) <- "SpaNorm"
-DEG <- FindAllMarkers(tumour_srt, test.used = "MAST")
+DEG <- FindAllMarkers(tumour_srt, test.use = "MAST")
 saveRDS(DEG, "deg_spanorm.Rds")
 ## pathway enrichment
 Hall <- readRDS("~/VisHD/Hall.Rds")
@@ -197,9 +257,10 @@ if (nrow(DEG) > 0) {
   cat("no DEG found\n")
 }
 
-tumour_srt <- AddModuleScore(tumour_srt, all_marker)
-# Rename the resulting metadata columns (Cluster1, Cluster2...) to actual cell types
-colnames(tumour_srt@meta.data)[colnames(tumour_srt@meta.data) %in% paste0("Cluster", 1:13)] <- names(all_marker)
+tumour_srt <- AddModuleScore(tumour_srt, features = all_marker, name = "ct_")
+# Rename the resulting metadata columns (ct_1..ct_N) to actual cell types
+added <- paste0("ct_", seq_along(all_marker))
+colnames(tumour_srt@meta.data)[match(added, colnames(tumour_srt@meta.data))] <- names(all_marker)
 
 g <- ImageFeaturePlot(tumour_srt, names(all_marker), cols = c("white", "red"))
 ggsave("png/spanorm_ImageFeaturePlot_normal_score.png", plot = g, width = 25, height = 15, dpi = 350)
@@ -207,8 +268,21 @@ ggsave("png/spanorm_ImageFeaturePlot_normal_score.png", plot = g, width = 25, he
 g <- FeaturePlot(tumour_srt, names(all_marker), cols = c("white", "red"))
 ggsave("png/spanorm_FeaturePlot_normal_score.png", plot = g, width = 25, height = 15, dpi = 350)
 
+g_p <- FeaturePlot(tumour_srt, names(all_marker), cols = c("white", "red"), reduction = "pearsonumap")
+ggsave("png/pearson_FeaturePlot_normal_score.png", plot = g_p, width = 25, height = 15, dpi = 350)
+
+# Gavish meta-programs (drop Malignant sheet for normal cells)
+tumour_srt <- score_meta_programs(
+  tumour_srt,
+  meta_programs[setdiff(names(meta_programs), "Malignant")],
+  out_dir = "png"
+)
+
 test <- FeaturePlot(tumour_srt, SVEC_marker, reduction = "banksy0.2.umap")
 ggsave(plot = test, "png/SVEC_marker.png", width = 12, height= 12)
+
+test_p <- FeaturePlot(tumour_srt, SVEC_marker, reduction = "pearsonumap")
+ggsave(plot = test_p, "png/pearson_SVEC_marker.png", width = 12, height = 12)
 
 top5_genes <- DEG %>%
     filter(p_val_adj < 0.05) %>%
@@ -322,6 +396,9 @@ g <- ImageDimPlot(tumour_srt, group.by= "celltype_annotation", cols = "polychrom
 ggsave(plot = g, "png/cell_type_anno_ImageDimplot.png", width = 6, height = 4)
 g <- FeaturePlot(tumour_srt, "secondary_expr_frac", reduction= "banksy0.2.umap") + VlnPlot(tumour_srt, "nFeature_Spatial", group.by = "celltype_annotation")
 ggsave(plot = g, "png/cell_type_anno_QC.png", width = 6, height = 4)
+
+g_p <- DimPlot(tumour_srt, group.by= "celltype_annotation", cols = "polychrome", reduction = "pearsonumap")
+ggsave(plot = g_p, "png/pearson_cell_type_anno_Dimplot.pdf", width = 6, height = 4)
 qs_save(tumour_srt, "normal_srt.qs2")
 
 srt2anndata(tumour_srt, save_name = 'normal')

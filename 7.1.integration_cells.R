@@ -285,31 +285,14 @@ ggsave(file.path(out_dir, "5b_FeaturePlot_tumour_normal_batch.png"),
        width = length(ucell_cols) * 4, height = 3, dpi = 400)
 
 # ── Export to AnnData ──────────────────────────────────────────────────────
-library(anndataR, lib.loc = "~/R_Library/4.5")
-
 h5ad_path <- file.path(out_dir, "integrated_cells.h5ad")
 if (!file.exists(h5ad_path)) {
   cat("Exporting to AnnData:", h5ad_path, "\n")
-
-  counts_mat <- t(GetAssayData(srt, assay = "Spatial", layer = "counts"))
-  data_mat   <- t(GetAssayData(srt, assay = "Spatial", layer = "data"))
-
-  spatial_coords <- as.matrix(srt@meta.data[, c("x_centroid", "y_centroid")])
-
-  adata <- AnnData(
-    X      = data_mat,
-    layers = list(counts = counts_mat),
-    obs    = srt@meta.data,
-    obsm   = list(
-      X_pearson_pca        = Embeddings(srt, "pearsonpca"),
-      X_pearson_umap       = Embeddings(srt, "pearsonumap"),
-      X_pearson_batch_pca  = Embeddings(srt, "pearsonbatchpca"),
-      X_pearson_batch_umap = Embeddings(srt, "pearsonbatchumap"),
-      spatial              = spatial_coords
-    )
-  )
-  adata$write_h5ad(h5ad_path, mode = "w")
-  cat("AnnData written:", h5ad_path, "\n")
+  srt2anndata(srt,
+              count_assay = "Spatial",
+              data_assay  = "Spatial",
+              save_name   = file.path(out_dir, "integrated_cells"),
+              svg_path    = NULL)
 } else {
   cat("AnnData already exists, skipping:", h5ad_path, "\n")
 }

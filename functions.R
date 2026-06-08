@@ -65,12 +65,26 @@ createSPEObject <- function(countMat,
   return(data_spe)
 }
 
-do.spanorm <- function(srt, outdir = ""){
+do.spanorm <- function(srt, outdir = "."){
   require(SpaNorm, lib.loc = "~/R_Library/4.5")
   require(leidenbase,  lib.loc = "~/R_Library/4.5")
+  # Seurat v5 keeps per-sample layers after merge — collapse so GetAssayData works
+  if (length(SeuratObject::Layers(srt, assay = "Spatial")) > 1) {
+    srt <- SeuratObject::JoinLayers(srt, assay = "Spatial")
+  }
   countMat <- GetAssayData(srt, assay = "Spatial", layer = "counts")
-  
-  spatial_coord <- GetTissueCoordinates(srt)[, c("x", "y")]
+
+  # After cross-sample merge there is no image — fall back to centroids stashed in meta.data
+  spatial_coord <- tryCatch(
+    GetTissueCoordinates(srt)[, c("x", "y")],
+    error = function(e) {
+      if (all(c("x_centroid", "y_centroid") %in% colnames(srt@meta.data))) {
+        setNames(srt@meta.data[, c("x_centroid", "y_centroid")], c("x", "y"))
+      } else {
+        stop("do.spanorm: no image and no x_centroid/y_centroid in meta.data")
+      }
+    }
+  )
   rownames(spatial_coord) <- colnames(countMat)
   set.seed(1)
   spe <- createSPEObject(countMat, spatial_locs= spatial_coord, cell_metadata = spatial_coord, normalize = FALSE)
@@ -102,7 +116,8 @@ do.pearson_pca <- function(srt,
                            assay            = "Spatial",
                            find_hvgs        = NULL,
                            reduction_prefix = NULL,
-                           clusters_col     = NULL) {
+                           clusters_col     = NULL,
+                           resolution       = 0.8) {
   require(scPearsonPCA, lib.loc = "~/R_Library/4.5")
   require(Seurat)
   require(data.table)
@@ -166,7 +181,8 @@ do.pearson_pca <- function(srt,
   srt[[paste0(reduction_prefix, "umap")]]  <- umapobj$ump
   srt[[paste0(reduction_prefix, "graph")]] <- Seurat::as.Graph(umapobj$grph)
 
-  srt <- FindClusters(srt, graph = paste0(reduction_prefix, "graph"))
+  srt <- FindClusters(srt, graph = paste0(reduction_prefix, "graph"),
+                      resolution = resolution)
   srt@meta.data[[clusters_col]] <- srt@meta.data$seurat_clusters
 
   srt
@@ -774,59 +790,85 @@ cellhighlight_imagedim <- function(srt, cond){
   return(p)
 }
 
+
+
 srt2anndata <- function(srt,
                         count_assay = "Spatial",
-                        data_assay = "SpaNorm",
-                        save_name) {
+                        data_assay  = "SpaNorm",
+                        save_name,
+                        svg_path    = "SVGs.Rds") {
   require(Seurat)
   require(dplyr)
   require(anndataR, lib.loc = "~/R_Library/4.5")
-  require(qs2)
   require(Matrix)
-  
-  # 1. Extract matrices and transpose to (cells x features) for AnnData
-  # Based on your str(), 'Spatial' is an Assay5 (we pull $counts)
-  # and 'SpaNorm' is an Assay (we pull $data)
-  counts_mat <- t(srt[[count_assay]]$counts)
-  data_mat <- t(srt[[data_assay]]$data)
-  
-  # 2. Extract metadata
+
+  # 1. Matrices: align to the SpaNorm gene set, transpose to (cells × genes),
+  #    and coerce to CsparseMatrix (anndataR's HDF5 writer rejects dgRMatrix
+  #    that Matrix::t() can produce, tripping .validate_aligned_array()).
+  counts_full  <- GetAssayData(srt, assay = count_assay, layer = "counts")
+  data_full    <- GetAssayData(srt, assay = data_assay,  layer = "data")
+  common_genes <- intersect(rownames(data_full), rownames(counts_full))
+  counts_mat   <- as(Matrix::t(counts_full[common_genes, ]), "CsparseMatrix")
+  data_mat     <- as(Matrix::t(data_full[common_genes, ]),   "CsparseMatrix")
+
+  # 2. obs: sanitise column names — HDF5 dataset names cannot contain '/'.
   metadata <- srt[[]]
-  
-  # 3. Extract dimensionality reductions
-  # We map these to standard scanpy naming conventions where possible
-  obsm_list <- list(
-    X_pca          = Embeddings(srt, "pca"),
-    X_umap         = Embeddings(srt, "umap"),
-    X_banksy_pca   = Embeddings(srt, "banksy0.2.pca"),
-    X_banksy_umap  = Embeddings(srt, "banksy0.2.umap")
+  colnames(metadata) <- gsub("/", "_", colnames(metadata), fixed = TRUE)
+  colnames(metadata) <- gsub("[|[:space:]]+", "_", colnames(metadata))
+  colnames(metadata) <- gsub("_+", "_", colnames(metadata))
+
+  # 3. obsm: export every reduction as X_<sanitised-name> (scanpy convention).
+  red_names <- Reductions(srt)
+  obsm_list <- setNames(
+    lapply(red_names, function(r) Embeddings(srt, r)),
+    paste0("X_", gsub("[.-]", "_", tolower(red_names)))
   )
-  
-  # 4. Extract Spatial Coordinates
-  # In V5, coordinates are in the 'fov' image centroids.
-  coords_df <- GetTissueCoordinates(srt)
-  
-  # Ensure the rownames match the metadata cells perfectly to avoid alignment errors
-  rownames(coords_df) <- coords_df$cell
-  spatial_coords <- as.matrix(coords_df[rownames(metadata), c("x", "y")])
-  
-  # Add coordinates to the obsm list (Squidpy/Scanpy standard key is "spatial")
-  obsm_list[["spatial"]] <- spatial_coords
-  
-  # 5. Construct the AnnData object
+
+  # 4. var: flag SVGs (fdr < 0.05) as highly_variable.
+  gene_names <- colnames(data_mat)
+  var_df <- data.frame(
+    highly_variable = rep(FALSE, length(gene_names)),
+    row.names       = gene_names
+  )
+  if (!is.null(svg_path) && file.exists(svg_path)) {
+    svgs_df <- as.data.frame(readRDS(svg_path))
+    hvg <- svgs_df %>% filter(!is.na(svg.fdr), svg.fdr < 0.05) %>% pull(symbol)
+    var_df$highly_variable <- gene_names %in% hvg
+    cat(sum(var_df$highly_variable), "SVGs (fdr<0.05) marked as highly_variable\n")
+    write.csv(svgs_df, sub("\\.Rds$", ".csv", svg_path), row.names = TRUE)
+  } else {
+    cat("SVGs.Rds not found at", svg_path, "— highly_variable set to FALSE\n")
+  }
+
+  # 5. Spatial coords → obsm[['spatial']] (Squidpy/Scanpy convention).
+  # Prefer FOV centroids; after cross-sample merge those are gone, so fall
+  # back to x_centroid / y_centroid stashed in @meta.data.
+  spatial_coords <- tryCatch({
+    coords_df <- GetTissueCoordinates(srt)
+    rownames(coords_df) <- coords_df$cell
+    as.matrix(coords_df[rownames(metadata), c("x", "y")])
+  }, error = function(e) NULL)
+  if (is.null(spatial_coords) &&
+      all(c("x_centroid", "y_centroid") %in% colnames(metadata))) {
+    spatial_coords <- as.matrix(metadata[, c("x_centroid", "y_centroid")])
+  }
+  if (!is.null(spatial_coords)) obsm_list[["spatial"]] <- spatial_coords
+
+  # 6. Build AnnData.
   adata <- AnnData(
-    X = data_mat,
-    # Sets 'SpaNorm' data as the main matrix
+    X      = data_mat,
     layers = list(counts = counts_mat),
-    # Stores 'Spatial' counts as a distinct layer
-    obs = metadata,
-    # Carries over all 28 meta.data columns
-    obsm = obsm_list                      # Carries over all reductions and spatial coords
+    obs    = metadata,
+    var    = var_df,
+    obsm   = obsm_list
   )
-  
-  # 6. Write to h5ad
-  adata$write_h5ad(paste0(save_name, ".h5ad"), mode = "w")
-  cat("All Done")
+
+  # 7. Write h5ad — disable HDF5 locking (Lustre) and remove any stale file.
+  Sys.setenv(HDF5_USE_FILE_LOCKING = "FALSE")
+  out_path <- normalizePath(paste0(save_name, ".h5ad"), mustWork = FALSE)
+  if (file.exists(out_path)) file.remove(out_path)
+  adata$write_h5ad(out_path, mode = "w")
+  cat("All Done ->", out_path, "\n")
 }
 
 
@@ -859,4 +901,96 @@ filter_artefacts_knn <- function(srt,
   
   # ── 4. Return clean object ────────────────────────────────────────────────
   return(subset(srt, cells = colnames(srt)[!srt$is_artefact]))
+}
+
+
+# Score every program in `meta_programs` (a nested list: sheet → program → genes)
+# onto `obj` and save one FeaturePlot PNG per sheet for each available reduction.
+score_meta_programs <- function(obj, meta_programs, out_dir,
+                                reductions = c("umap", "pearsonumap"),
+                                tag = "") {
+  require(Seurat)
+  require(ggplot2)
+  for (sheet in names(meta_programs)) {
+    progs <- Filter(function(g) length(intersect(g, rownames(obj))) >= 3,
+                    meta_programs[[sheet]])
+    if (length(progs) == 0) next
+
+    pref <- paste0(".meta.", make.names(sheet), ".")
+    obj  <- AddModuleScore(obj, features = progs, name = pref)
+    raw  <- paste0(pref, seq_along(progs))
+    cols <- paste0(sheet, "_", names(progs))
+    colnames(obj@meta.data)[match(raw, colnames(obj@meta.data))] <- cols
+
+    ncol_g <- min(3, length(cols))
+    nrow_g <- ceiling(length(cols) / ncol_g)
+    base   <- make.names(sheet)
+
+    for (red in intersect(reductions, Reductions(obj))) {
+      red_suffix <- if (red == "umap") "" else paste0("_", red)
+      g <- FeaturePlot(obj, cols, ncol = ncol_g, reduction = red) &
+        scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred")
+      ggsave(file.path(out_dir, paste0("meta_", base, tag, red_suffix, ".png")),
+             plot = g, width = ncol_g * 4, height = nrow_g * 3.5,
+             dpi = 200, limitsize = FALSE)
+    }
+  }
+  obj
+}
+
+
+# Run GSEA for every cluster against each gene-set collection and save the result.
+# `gene_sets` is a named list (e.g. list(Hallmark=Hall, C6=C6, C5=C5)).
+run_gsea_panel <- function(deg, gene_sets, out_path) {
+  if (is.null(deg) || nrow(deg) == 0) {
+    message("run_gsea_panel: empty DEG, skipping")
+    return(invisible(NULL))
+  }
+  deg <- deg %>% dplyr::filter(p_val_adj < 0.05) %>% dplyr::arrange(desc(avg_log2FC))
+  if (nrow(deg) == 0) {
+    message("run_gsea_panel: no DEG passing p_val_adj < 0.05, skipping")
+    return(invisible(NULL))
+  }
+  gene_list <- lapply(split(deg, deg$cluster),
+                      function(x) setNames(x$avg_log2FC, x$gene))
+
+  enrich_all <- lapply(gene_sets, function(geneset) {
+    out <- lapply(names(gene_list), function(cn) {
+      tryCatch(clusterProfiler::GSEA(gene_list[[cn]], TERM2GENE = geneset),
+               error = function(e) {
+                 message(sprintf("GSEA cluster '%s' failed: %s",
+                                 cn, conditionMessage(e)))
+                 NULL
+               })
+    })
+    names(out) <- names(gene_list)
+    out
+  })
+  saveRDS(enrich_all, out_path)
+  invisible(enrich_all)
+}
+
+
+# Save Image + UMAP FeaturePlots of the top-N DEG per cluster.
+plot_top_deg <- function(srt, deg, out_dir, prefix = "spanorm_DEG",
+                         n = 5, pct_diff_min = 0.2) {
+  require(Seurat)
+  require(ggplot2)
+  require(patchwork)
+  if (is.null(deg) || nrow(deg) == 0) return(invisible(NULL))
+  top_genes <- deg %>%
+    dplyr::filter(abs(pct.1 - pct.2) > pct_diff_min) %>%
+    dplyr::group_by(cluster) %>%
+    dplyr::slice_max(order_by = avg_log2FC, n = n) %>%
+    dplyr::pull(gene)
+  if (length(top_genes) == 0) return(invisible(NULL))
+
+  f_img <- ImageFeaturePlot(srt, top_genes, size = 0.3)
+  ggsave(file.path(out_dir, paste0(prefix, "_ImageFeaturePlot.png")),
+         plot = f_img + plot_layout(ncol = 5), limitsize = FALSE,
+         width = 15, height = 50, dpi = 350)
+  f_um <- FeaturePlot(srt, top_genes)
+  ggsave(file.path(out_dir, paste0(prefix, "_FeaturePlot.png")),
+         plot = f_um, limitsize = FALSE, width = 15, height = 30, dpi = 350)
+  invisible(top_genes)
 }

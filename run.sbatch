@@ -3,12 +3,12 @@
 #SBATCH --account=pawsey1172
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=200G
-#SBATCH --time=09:00:00
-#SBATCH --job-name=integrate_raw_binned
-#SBATCH --partition=work
-#SBATCH --output="slurmout/1.integrate_raw_binned-%j.out"
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=500G
+#SBATCH --time=20:00:00
+#SBATCH --job-name=infercnv_test
+#SBATCH --partition=highmem
+#SBATCH --output="slurmout/2.2.infercnv_test-%j.out"
 
 dir="${MYSCRATCH}"
 # Set the image and tag we want to use
@@ -36,4 +36,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/1.integrate_raw_binned.R
+  Rscript ~/VisHD/2.2.infercnv_test.R

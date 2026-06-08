@@ -1,13 +1,14 @@
 #!/bin/bash -l
 # Allocate slurm resources, edit as necessary
+#SBATCH --account=pawsey1172
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=6
-#SBATCH --mem=150G
-#SBATCH --time=10:00:00
-#SBATCH --job-name=infercnv
-#SBATCH --array=2,8
-#SBATCH --output="slurmout/3.2.infercnv_subclone-%j-%a.out"
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=80G
+#SBATCH --time=05:00:00
+#SBATCH --job-name=tumour_normal_split
+#SBATCH --array=1-8
+#SBATCH --output="slurmout/4.1.tumour_normal_split-%j-%a.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --partition=work
@@ -38,4 +39,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/3.2.infercnv_subclone.R "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/4.1.tumour_normal_split.R "$SLURM_ARRAY_TASK_ID"

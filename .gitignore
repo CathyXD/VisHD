@@ -29,6 +29,9 @@ raw/*/**
 # Drop Jupyter autosave checkpoints (real notebooks above stay tracked)
 **/.ipynb_checkpoints/
 
+# Per-sample executed notebook copies are outputs, not source — keep root ones only
+LUT-245-*/**/*.ipynb
+
 !.gitignore
 !CLAUDE.md
 

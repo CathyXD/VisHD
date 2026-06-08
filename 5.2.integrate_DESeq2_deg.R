@@ -18,6 +18,8 @@ suppressPackageStartupMessages({
   library(ComplexHeatmap)
   library(circlize)
   library(RColorBrewer)
+  library(readxl)
+  library(purrr)
 })
 source("~/VisHD/functions.R")
 
@@ -32,6 +34,26 @@ dir.create(png_dir, showWarnings = FALSE, recursive = TRUE)
 Hall <- readRDS(file.path(base_dir, "Hall.Rds"))
 C5   <- readRDS(file.path(base_dir, "C5.Rds"))
 C6   <- readRDS(file.path(base_dir, "C6.Rds"))
+
+# Public signature gene sets
+archetype_module <- readRDS("~/VisHD/public_signature/clean_module.Rds")
+# Load only the Malignant sheet; each column is one meta-program, NA-padded.
+meta_programs <- read_excel(
+  "~/VisHD/public_signature/meta_programs_2025-01-29.xlsx",
+  sheet = "Malignant", col_names = TRUE
+) |>
+  map(~ as.character(na.omit(.x)))
+
+# Convert named gene lists -> clusterProfiler TERM2GENE (term, gene)
+list_to_term2gene <- function(lst) {
+  data.frame(
+    term = rep(names(lst), lengths(lst)),
+    gene = unlist(lst, use.names = FALSE),
+    stringsAsFactors = FALSE
+  )
+}
+Archetype <- list_to_term2gene(archetype_module)
+MetaProgM <- list_to_term2gene(meta_programs)
 
 min_cells <- 10   # minimum cells to keep a pseudobulk sample
 
@@ -51,19 +73,23 @@ for (s in samples) {
 cat(length(srt_list), "samples loaded\n")
 
 # ── 2. Merge and save integrated object ───────────────────────────────────────
-cat("Merging ...\n")
-srt_merged <- merge(
-  srt_list[[1]],
-  y            = srt_list[-1],
-  add.cell.ids = names(srt_list),
-  merge.data   = FALSE
-)
-# Seurat v5: join layers so counts are accessible as a single matrix
-srt_merged <- JoinLayers(srt_merged, assay = "Spatial")
+merged_f <- file.path(outdir, "merged_tumour_srt.qs2")
+if (file.exists(merged_f)) {
+  cat("Loading existing merged object ...\n")
+  srt_merged <- qs_read(merged_f)
+} else {
+  cat("Merging ...\n")
+  srt_merged <- merge(
+    srt_list[[1]],
+    y            = srt_list[-1],
+    add.cell.ids = names(srt_list),
+    merge.data   = FALSE
+  )
+  srt_merged <- JoinLayers(srt_merged, assay = "Spatial")
+  qs_save(srt_merged, merged_f)
+  cat("Integrated object saved.\n")
+}
 cat("Merged:", ncol(srt_merged), "cells,", nrow(srt_merged), "genes\n")
-
-qs_save(srt_merged, file.path(outdir, "merged_tumour_srt.qs2"))
-cat("Integrated object saved.\n")
 
 # ── 3. Pseudobulk aggregation ─────────────────────────────────────────────────
 meta <- srt_merged@meta.data %>%
@@ -247,7 +273,9 @@ sig_df <- res_df %>%
 if (nrow(sig_df) > 0) {
   gene_list <- setNames(sig_df$log2FoldChange, sig_df$gene)
 
-  enrich_list <- lapply(list(Hallmark = Hall, C6 = C6, C5 = C5), function(gs) {
+  enrich_list <- lapply(list(Hallmark = Hall, C6 = C6, C5 = C5,
+                              Archetype = Archetype,
+                              MetaProgMalignant = MetaProgM), function(gs) {
     tryCatch(
       clusterProfiler::GSEA(gene_list, TERM2GENE = gs, verbose = FALSE),
       error   = function(e) NULL,
@@ -296,7 +324,9 @@ per_pair_lfc <- vapply(pairs, function(p) {
 }, numeric(nrow(vst_mat)))
 rownames(per_pair_lfc) <- rownames(vst_mat)
 
-gsea_collections <- list(Hallmark = Hall, C6 = C6, C5 = C5)
+gsea_collections <- list(Hallmark = Hall, C6 = C6, C5 = C5,
+                         Archetype = Archetype,
+                         MetaProgMalignant = MetaProgM)
 
 for (coll_nm in names(gsea_collections)) {
   gs <- gsea_collections[[coll_nm]]
@@ -392,6 +422,176 @@ for (coll_nm in names(gsea_collections)) {
   dev.off()
   cat("GSEA NES heatmap:", coll_nm, "—", nrow(nes_plot), "pathways ×",
       ncol(nes_plot), "samples\n")
+}
+
+# ── 9. Cohort B vs Cohort A among DT pseudobulks ─────────────────────────────
+cohortA <- c("LUT-245-07", "LUT-245-09", "LUT-245-10")
+cohortB <- c("LUT-245-11", "LUT-245-15", "LUT-245-16", "LUT-245-17", "LUT-245-20")
+
+pb_meta$sample_id <- sub("_sc.*", "", as.character(pb_meta$sample_subclone))
+pb_meta$cohort    <- ifelse(pb_meta$sample_id %in% cohortA, "A",
+                     ifelse(pb_meta$sample_id %in% cohortB, "B", NA_character_))
+
+dt_idx        <- pb_meta$category_bin == "DT" & !is.na(pb_meta$cohort)
+pb_meta_dt    <- pb_meta[dt_idx, , drop = FALSE]
+pb_meta_dt$cohort <- factor(pb_meta_dt$cohort, levels = c("A", "B"))
+pb_counts_dt  <- pb_counts[, rownames(pb_meta_dt), drop = FALSE]
+
+keep_co      <- rowSums(pb_counts_dt >= 10) >= max(2, floor(ncol(pb_counts_dt) / 5))
+pb_counts_dt <- pb_counts_dt[keep_co, ]
+cat("Cohort DT pseudobulks:", ncol(pb_counts_dt),
+    "| genes after filter:", sum(keep_co), "\n")
+
+if (length(unique(pb_meta_dt$cohort)) < 2 || ncol(pb_counts_dt) < 4) {
+  cat("Skipping cohort comparison — insufficient samples.\n")
+} else {
+  dds_co  <- DESeqDataSetFromMatrix(
+    countData = as.matrix(pb_counts_dt),
+    colData   = pb_meta_dt,
+    design    = ~cohort
+  )
+  dds_co  <- DESeq(dds_co, parallel = FALSE)
+  res_co  <- results(dds_co, contrast = c("cohort", "B", "A"), alpha = 0.05)
+  res_co_df <- as.data.frame(res_co) %>%
+    rownames_to_column("gene") %>%
+    arrange(padj)
+
+  saveRDS(dds_co,     file.path(outdir, "deseq2_dds_cohortB_vs_A_DT.Rds"))
+  saveRDS(res_co_df,  file.path(outdir, "deseq2_res_cohortB_vs_A_DT.Rds"))
+  write.csv(res_co_df, file.path(outdir, "deseq2_res_cohortB_vs_A_DT.csv"),
+            row.names = FALSE)
+
+  n_sig_co <- sum(!is.na(res_co_df$padj) &
+                  res_co_df$padj < 0.05 &
+                  abs(res_co_df$log2FoldChange) > 0.5)
+  cat("Cohort B vs A DEGs (padj<0.05, |lfc|>0.5):", n_sig_co, "\n")
+
+  # 9a. PCA
+  vsd_co  <- vst(dds_co, blind = TRUE)
+  pca_co  <- plotPCA(vsd_co, intgroup = c("cohort", "sample_id"),
+                     returnData = TRUE)
+  pct_co  <- round(100 * attr(pca_co, "percentVar"))
+  pca_co$sample_subclone <- rownames(pca_co)
+  p_pca_co <- ggplot(pca_co, aes(PC1, PC2, colour = cohort, shape = sample_id,
+                                  label = sample_subclone)) +
+    geom_point(size = 3.5) +
+    geom_text_repel(size = 2.5, max.overlaps = 20) +
+    scale_colour_manual(values = c(A = "steelblue", B = "firebrick")) +
+    scale_shape_manual(values = seq_len(length(unique(pca_co$sample_id)))) +
+    labs(title = "PCA — DT pseudobulks (cohort A vs B)",
+         x = paste0("PC1: ", pct_co[1], "% variance"),
+         y = paste0("PC2: ", pct_co[2], "% variance"),
+         colour = "Cohort", shape = "Sample") +
+    theme_classic()
+  ggsave(file.path(png_dir, "7_PCA_cohortB_vs_A_DT.png"),
+         p_pca_co, width = 9, height = 6, dpi = 200)
+
+  # 9b. Volcano
+  p_vol_co <- res_co_df %>%
+    filter(!is.na(pvalue)) %>%
+    mutate(
+      sig   = !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 0.5,
+      label = ifelse(sig & rank(-abs(log2FoldChange)) <= 30, gene, NA_character_)
+    ) %>%
+    ggplot(aes(log2FoldChange, -log10(pvalue + 1e-300),
+               colour = sig, label = label)) +
+    geom_point(size = 0.8, alpha = 0.7) +
+    geom_text_repel(size = 2.5, max.overlaps = 25, na.rm = TRUE) +
+    scale_colour_manual(values = c("grey70", "firebrick")) +
+    geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", colour = "grey40") +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", colour = "grey40") +
+    labs(title = "Cohort B vs A — DT pseudobulk DESeq2",
+         subtitle = paste0(n_sig_co, " DEGs  |  positive = cohort B"),
+         x = "log2 Fold Change", y = "-log10(p-value)") +
+    theme_classic() + theme(legend.position = "none")
+  ggsave(file.path(png_dir, "8_volcano_cohortB_vs_A_DT.png"),
+         p_vol_co, width = 7, height = 5, dpi = 200)
+
+  # 9c. MA plot
+  p_ma_co <- res_co_df %>%
+    filter(!is.na(padj)) %>%
+    mutate(sig = padj < 0.05 & abs(log2FoldChange) > 0.5) %>%
+    ggplot(aes(log10(baseMean + 1), log2FoldChange, colour = sig)) +
+    geom_point(size = 0.7, alpha = 0.6) +
+    geom_hline(yintercept = 0, colour = "black") +
+    geom_hline(yintercept = c(-0.5, 0.5), linetype = "dashed", colour = "grey40") +
+    scale_colour_manual(values = c("grey70", "firebrick")) +
+    labs(title = "MA plot — cohort B vs A (DT)",
+         x = "log10(mean counts + 1)", y = "log2 Fold Change") +
+    theme_classic() + theme(legend.position = "none")
+  ggsave(file.path(png_dir, "9_MA_cohortB_vs_A_DT.png"),
+         p_ma_co, width = 6, height = 4, dpi = 200)
+
+  # 9d. Heatmap of top DEGs
+  top_co <- res_co_df %>%
+    filter(!is.na(padj), padj < 0.05, abs(log2FoldChange) > 0.5) %>%
+    slice_min(padj, n = 60) %>%
+    pull(gene)
+
+  if (length(top_co) >= 5) {
+    mat_co <- assay(vsd_co)[top_co, , drop = FALSE]
+    mat_co <- t(scale(t(mat_co)))
+    mat_co[mat_co >  3] <-  3
+    mat_co[mat_co < -3] <- -3
+
+    col_fun_co <- colorRamp2(c(-3, 0, 3), c("#2166AC", "white", "#B2182B"))
+    co_col     <- c(A = "steelblue", B = "firebrick")
+    samp_lvls2 <- unique(pb_meta_dt$sample_id)
+    samp_col2  <- setNames(colorRampPalette(brewer.pal(8, "Set2"))(length(samp_lvls2)),
+                           samp_lvls2)
+
+    ha_co <- HeatmapAnnotation(
+      Cohort = pb_meta_dt[colnames(mat_co), "cohort"],
+      Sample = pb_meta_dt[colnames(mat_co), "sample_id"],
+      col    = list(Cohort = co_col, Sample = samp_col2),
+      annotation_name_side = "left"
+    )
+
+    png(file.path(png_dir, "10_heatmap_cohortB_vs_A_DT.png"),
+        width = 1600, height = 2000, res = 200)
+    draw(Heatmap(
+      mat_co, name = "z-score", col = col_fun_co,
+      top_annotation = ha_co,
+      show_row_names = TRUE, show_column_names = TRUE,
+      row_names_gp = gpar(fontsize = 7), column_names_gp = gpar(fontsize = 7),
+      column_title = paste0("Top ", length(top_co), " DEGs — cohort B vs A (DT)"),
+      clustering_method_columns = "ward.D2",
+      column_split = pb_meta_dt[colnames(mat_co), "cohort"]
+    ))
+    dev.off()
+  }
+
+  # 9e. GSEA across all collections
+  sig_co_df <- res_co_df %>%
+    filter(!is.na(padj), padj < 0.05) %>%
+    arrange(desc(log2FoldChange))
+
+  if (nrow(sig_co_df) > 0) {
+    gene_list_co <- setNames(sig_co_df$log2FoldChange, sig_co_df$gene)
+
+    enrich_co <- lapply(list(Hallmark = Hall, C6 = C6, C5 = C5,
+                              Archetype = Archetype,
+                              MetaProgMalignant = MetaProgM), function(gs) {
+      tryCatch(
+        clusterProfiler::GSEA(gene_list_co, TERM2GENE = gs, verbose = FALSE),
+        error = function(e) NULL, warning = function(w) NULL
+      )
+    })
+    saveRDS(enrich_co, file.path(outdir, "enrich_cohortB_vs_A_DT.Rds"))
+
+    for (nm in names(enrich_co)) {
+      res_e <- enrich_co[[nm]]
+      if (is.null(res_e) || nrow(res_e@result) == 0) next
+      sig_n <- sum(res_e@result$p.adjust < 0.05, na.rm = TRUE)
+      if (sig_n == 0) next
+      p_e <- pathwayenrich_plot(top_n = min(10, sig_n), gsea_result = res_e)
+      ggsave(file.path(png_dir, paste0("11_GSEA_cohortB_vs_A_DT_", nm, ".pdf")),
+             p_e, width = 6, height = 10)
+    }
+    cat("Cohort GSEA done\n")
+  } else {
+    cat("No significant cohort DEGs — skipping GSEA\n")
+  }
 }
 
 message("\nDone. Results in: ", outdir)

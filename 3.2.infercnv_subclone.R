@@ -55,9 +55,10 @@ infercnvobject = CreateInfercnvObject(raw_counts_matrix=as.matrix(GetAssayData(s
                                       gene_order_file= generef,
                                       ref_group_names="Normal")
 
-if (!file.exists("infercnv_subclone")){
-  dir.create("infercnv_subclone")
+if (dir.exists("infercnv_subclone")) {
+  unlink("infercnv_subclone", recursive = TRUE)
 }
+dir.create("infercnv_subclone")
 
 infercnvobject = infercnv::run(infercnvobject,
                                cutoff=0.01, # cutoff=1 works well for Smart-seq2, and cutoff=0.1 works well for 10x Genomics
@@ -67,11 +68,23 @@ infercnvobject = infercnv::run(infercnvobject,
                                cluster_references = T, 
                                denoise=F,
                                HMM=F,
-                               save_rds = F, 
-                               plot_steps = F, 
-                               write_phylo = T, 
-                               write_expr_matrix = F,
-                               output_format = "pdf",
-                               num_threads = 6, 
-                               resume_mode = F)
-infercnv::plot_per_group(infercnvobject, on_observations = F, out_dir ="infercnv_subclone",  write_expr_matrix = F, save_objects =T)
+                               save_rds= TRUE,
+                              plot_steps         = FALSE,
+                              write_phylo        = TRUE,
+                              write_expr_matrix  = FALSE,
+                              no_plot            = TRUE,
+                              num_threads        = 8,
+                              resume_mode        = TRUE
+                               )
+plot_per_group(
+  infercnvobject,
+  on_references     = TRUE,
+  on_observations   = TRUE,
+  base_filename     = "infercnv_per_group",
+  output_format     = "pdf",
+  write_expr_matrix = FALSE,
+  png_res           = 300,
+  dynamic_resize    = 0,
+  useRaster         = TRUE,
+  out_dir           = "infercnv_subclone"
+)

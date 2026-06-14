@@ -30,13 +30,14 @@ i = samples[arg]
 cat("working at", path, "\n")
 
 
-out_qs <- "tumour_anno_srt_with_public_signatures.qs2"
+out_qs <- "tumour_subclone_srt_with_public_signatures.qs2"
 scores_present <- file.exists(out_qs)
 if (scores_present) {
   cat("Loading existing object:", out_qs, "\n")
   srt <- qs_read(out_qs)
 } else {
-  srt <- qs_read("tumour_anno_srt.qs2")
+  srt <- qs_read("tumour_subclone_srt.qs2")
+  srt <- subset(srt, subset = tumour_anno != "Removed")
   srt <- do.spanorm(srt)
 }
 

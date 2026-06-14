@@ -10,8 +10,9 @@ library(msigdbr)
 library(pals)
 library(ggpubr)
 library(qs2)
+library(UCell, lib.loc = "~/R_Library/4.5")
 
-in_srt  <- path.expand("~/VisHD/1.integrate_raw_cell/normal_srt.qs2")
+in_srt  <- path.expand("~/VisHD/8.1.normal_cell_integration/integrated_pearson_srt2.qs2")
 in_csv  <- path.expand("~/VisHD/9.normalcell_annotation/celltype_hint_per_cell.csv")
 out_dir <- path.expand("~/VisHD/9.2.scimilarity_check")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
@@ -87,6 +88,12 @@ ggsave(file.path(out_dir, "3_celltype_boxplot.png"),
        box, width = 18, height = 6, dpi = 400)
 
 write.csv(comp, file.path(out_dir, "composition.csv"), row.names = FALSE)
+
+# ── Re-cluster pearsonbatchpca at resolution 1.5 (before TME pipeline) ─────
+srt <- FindClusters(srt, graph = "pearsonbatchgraph", resolution = 1.5)
+srt@meta.data$pearson_clusters_batch <- srt@meta.data$seurat_clusters
+cat("Re-clustered pearsonbatchpca at res 1.5:",
+    nlevels(srt@meta.data$pearson_clusters_batch), "clusters\n")
 
 # ── TME cell-type annotation pipeline (mirror of 8.1) ─────────────────────
 source("~/VisHD/normal_markers.R")
@@ -293,7 +300,20 @@ for (ct in names(meta_programs)) {
     srt[[paste0(score_name, "1")]] <- NULL
   }
 }
-
+for (ct in names(meta_programs)) {
+  ct_dir <- file.path(mp_root, paste(gsub("[^A-Za-z0-9]+", "_", ct), "UCell", sep = "_"))
+  dir.create(ct_dir, showWarnings = FALSE, recursive = TRUE)
+  srt <- AddModuleScore_UCell(srt, features = meta_programs[[ct]], missing_genes = "skip")
+  for (prog in names(meta_programs[[ct]])) {
+    genes <- intersect(meta_programs[[ct]][[prog]], genes_in_srt)
+    fp <- FeaturePlot(srt, features = paste0(prog, "_UCell"),
+                      reduction = "pearsonbatchumap", order = TRUE) +
+      scale_color_gradient(low = "snow", high = "red", limits = c(0, NA)) +
+      ggtitle(sprintf("%s — %s (%d genes)", ct, prog, length(genes)))
+    fname <- sprintf("%s.png", gsub("[^A-Za-z0-9]+", "_", prog))
+    ggsave(file.path(ct_dir, fname), fp, width = 6, height = 5, dpi = 300)
+  }
+}
 qs_save(srt, file.path(out_dir, "normal_srt_annotated.qs2"))
 
 setwd(out_dir)

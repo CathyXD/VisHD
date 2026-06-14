@@ -148,6 +148,13 @@ do.pearson_pca <- function(srt,
     hvgs <- existing_hvgs
   }
 
+  # scPearsonPCA rejects zero-variance genes (check_x_is_dgcmatrix); drop them.
+  hvg_var <- Matrix::rowMeans(counts_mat[hvgs, ]^2) - Matrix::rowMeans(counts_mat[hvgs, ])^2
+  if (any(hvg_var <= 0)) {
+    message(sprintf("Dropping %d zero-variance HVGs before Pearson PCA", sum(hvg_var <= 0)))
+    hvgs <- hvgs[hvg_var > 0]
+  }
+
   if (batched) {
     if (!batch_variable %in% colnames(srt@meta.data)) {
       stop(sprintf("batch_variable '%s' not found in srt@meta.data", batch_variable))

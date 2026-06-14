@@ -1,9 +1,9 @@
 #!/bin/bash -l
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=100G
-#SBATCH --time=6:00:00
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=150G
+#SBATCH --time=5:00:00
 #SBATCH --job-name=infercnv_check
 #SBATCH --output="slurmout/8.1.2.infercnv_check-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org

@@ -1,9 +1,9 @@
 #!/bin/bash -l
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=256G
-#SBATCH --time=04:00:00
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=200G
+#SBATCH --time=5:00:00
 #SBATCH --job-name=integrate_archetype
 #SBATCH --output="slurmout/integrate_archetype-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org

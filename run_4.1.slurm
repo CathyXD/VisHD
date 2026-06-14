@@ -3,14 +3,14 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=80G
-#SBATCH --time=3:00:00
-#SBATCH --job-name=DT_deg
+#SBATCH --time=6:00:00
+#SBATCH --job-name=tumour_split
 #SBATCH --array=1-8
-#SBATCH --output="slurmout/5.1.DT_deg-%j-%a.out"
+#SBATCH --output="slurmout/4.1.tumour_split-%j-%a.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
-#SBATCH --partition=work
 #SBATCH --account=pawsey1172
+#SBATCH --partition=work
 
 dir="${MYSCRATCH}"
 image="docker://swweng/spatial:4.5v6"
@@ -27,9 +27,9 @@ tmp_dir="/tmp/tmp_$USER"
 mkdir -p $tmp_dir
 
 srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
-singularity exec -c \
--B ${tmp_dir}:/tmp \
--B ${dir}:$HOME \
--B ${tmp_dir}:/var \
-${imagename} \
-Rscript ~/VisHD/5.1.0.DT_deg.R "$SLURM_ARRAY_TASK_ID"
+  singularity exec -c \
+  -B ${tmp_dir}:/tmp \
+  -B ${dir}:$HOME \
+  -B ${tmp_dir}:/var \
+  ${imagename} \
+  Rscript ~/VisHD/4.1.tumour_split.R "$SLURM_ARRAY_TASK_ID"

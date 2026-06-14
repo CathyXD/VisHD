@@ -3,7 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=150G
-#SBATCH --time=6:00:00
+#SBATCH --time=5:00:00
 #SBATCH --job-name=integrate_tumour_anno
 #SBATCH --output="slurmout/4.5.integrate_tumour_anno-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org

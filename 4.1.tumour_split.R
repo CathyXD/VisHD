@@ -97,7 +97,7 @@ normal_dir <- file.path(path, "normal")
 if (!dir.exists(tumour_dir)) dir.create(tumour_dir, recursive = TRUE)
 if (!dir.exists(normal_dir)) dir.create(normal_dir, recursive = TRUE)
 
-srt_cell_filtered <- qs_read(file.path(path, "tumour_anno_srt.qs2"))
+srt_cell_filtered <- qs_read(file.path(path, "tumour_subclone_srt.qs2"))
 
 
 # ── Tumour cells ───────────────────────────────────────────────────────────
@@ -112,15 +112,20 @@ tumour_srt <- CellCycleScoring(tumour_srt,
 tumour_srt <- FindClusters(tumour_srt, resolution = 0.8, algorithm = 4)
 spatial_plot(tumour_srt, outdir = "png/", name = "spanorm")
 
+# ATAClone_cluster is absent from tumour_subclone_srt.qs2; prefer the refined
+# `subclone` label and fall back to category so these diagnostics never crash.
+clone_col <- if ("subclone" %in% colnames(tumour_srt@meta.data)) "subclone" else
+             if ("ATAClone_cluster" %in% colnames(tumour_srt@meta.data)) "ATAClone_cluster" else "category"
+
 g  <- DimPlot(tumour_srt, group.by = "category") +
-      DimPlot(tumour_srt, group.by = "ATAClone_cluster", cols = "polychrome")
+      DimPlot(tumour_srt, group.by = clone_col, cols = "polychrome")
 g2 <- ImageDimPlot(tumour_srt, group.by = "category") +
-      ImageDimPlot(tumour_srt, group.by = "ATAClone_cluster", cols = "polychrome")
+      ImageDimPlot(tumour_srt, group.by = clone_col, cols = "polychrome")
 ggsave("png/spanorm_category_subclone.png", plot = g / g2,
        width = 10, height = 10, dpi = 350, create.dir = TRUE)
 
 g_p <- DimPlot(tumour_srt, group.by = "category", reduction = "pearsonumap") +
-       DimPlot(tumour_srt, group.by = "ATAClone_cluster", cols = "polychrome",
+       DimPlot(tumour_srt, group.by = clone_col, cols = "polychrome",
                reduction = "pearsonumap")
 ggsave("png/pearson_category_subclone.png", plot = g_p,
        width = 10, height = 5, dpi = 350, create.dir = TRUE)
@@ -188,110 +193,3 @@ plot_top_deg(tumour_srt, DEG %>% filter(p_val_adj < 0.05),
 cat("===================== tumour done ====================\n")
 
 
-# ── Normal cells ───────────────────────────────────────────────────────────
-setwd(normal_dir)
-normal_srt <- subset(srt_cell_filtered, subset = tumour_anno == "Normal")
-normal_srt <- do.spanorm(normal_srt)
-normal_srt <- do.pearson_pca(normal_srt)
-normal_srt <- FindClusters(normal_srt, resolution = 0.8, algorithm = 4)
-spatial_plot(normal_srt, outdir = "png/", name = "spanorm")
-qs_save(normal_srt, "normal_srt.qs2")
-cat("SpaNorm Done\n")
-
-normal_srt <- SeuratWrappers::RunBanksy(normal_srt, lambda = 0.2, verbose = TRUE,
-                                        use_agf = TRUE, assay = "SpaNorm", slot = "data",
-                                        k_geom = c(15), assay_name = "BANKSY_0.2")
-normal_srt <- RunPCA(normal_srt, npcs = 30, features = rownames(normal_srt),
-                     reduction.name = "banksy0.2.pca")
-normal_srt <- RunUMAP(normal_srt, dims = 1:20, reduction = "banksy0.2.pca",
-                      reduction.name = "banksy0.2.umap")
-normal_srt <- FindNeighbors(normal_srt, reduction = "banksy0.2.pca", dims = 1:20)
-normal_srt <- FindClusters(normal_srt, resolution = 1, algorithm = 4)
-qs_save(normal_srt, "normal_srt.qs2")
-spatial_plot(normal_srt, outdir = "png/", name = "Bansky_lam0.2")
-cat("BANKSY DONE\n")
-
-DefaultAssay(normal_srt) <- "SpaNorm"
-DEG_n <- FindAllMarkers(normal_srt, test.use = "MAST")
-saveRDS(DEG_n, "deg_spanorm.Rds")
-run_gsea_panel(DEG_n, gene_sets, "deg_enrich.Rds")
-
-normal_srt <- AddModuleScore(normal_srt, features = all_marker, name = "ct_")
-added <- paste0("ct_", seq_along(all_marker))
-colnames(normal_srt@meta.data)[match(added, colnames(normal_srt@meta.data))] <-
-  names(all_marker)
-
-ggsave("png/spanorm_ImageFeaturePlot_normal_score.png",
-       plot = ImageFeaturePlot(normal_srt, names(all_marker), cols = c("white", "red")),
-       width = 25, height = 15, dpi = 350)
-ggsave("png/spanorm_FeaturePlot_normal_score.png",
-       plot = FeaturePlot(normal_srt, names(all_marker), cols = c("white", "red")),
-       width = 25, height = 15, dpi = 350)
-ggsave("png/pearson_FeaturePlot_normal_score.png",
-       plot = FeaturePlot(normal_srt, names(all_marker), cols = c("white", "red"),
-                          reduction = "pearsonumap"),
-       width = 25, height = 15, dpi = 350)
-
-# Gavish meta-programs (drop Malignant sheet for normal cells)
-normal_srt <- score_meta_programs(
-  normal_srt,
-  meta_programs[setdiff(names(meta_programs), "Malignant")],
-  out_dir = "png"
-)
-
-ggsave("png/SVEC_marker.png",
-       plot = FeaturePlot(normal_srt, SVEC_marker, reduction = "banksy0.2.umap"),
-       width = 12, height = 12)
-ggsave("png/pearson_SVEC_marker.png",
-       plot = FeaturePlot(normal_srt, SVEC_marker, reduction = "pearsonumap"),
-       width = 12, height = 12)
-
-plot_top_deg(normal_srt, DEG_n %>% filter(p_val_adj < 0.05),
-             out_dir = "png", prefix = "spanorm_DEG")
-
-# ── Cluster cell-type annotation ───────────────────────────────────────────
-if (!"celltype_annotation" %in% colnames(normal_srt@meta.data)) {
-  normal_srt <- tme_cluster_annotation_pipeline(
-    obj                 = normal_srt,
-    tme_markers         = tme_markers,
-    secondary_genes     = c8_tme_markers,
-    cluster_col         = "pearson_clusters",
-    assay               = "SpaNorm",
-    data_slot           = "data",
-    expr_min_val        = 0,
-    primary_expr_frac   = 0.05,
-    secondary_expr_frac = 0.01,
-    min_markers         = 3,
-    conf_threshold      = 0.2,
-    exclusivity_weight  = 0.30,
-    detection_min       = 0.01,
-    trim                = 0.10
-  )
-  qs_save(normal_srt, "normal_srt.qs2")
-}
-
-ggsave("png/cell_type_anno_Dimplot.pdf",
-       plot = DimPlot(normal_srt, group.by = "celltype_annotation",
-                      cols = "polychrome", reduction = "banksy0.2.umap"),
-       width = 6, height = 4)
-ggsave("png/cell_type_anno_ImageDimplot.png",
-       plot = ImageDimPlot(normal_srt, group.by = "celltype_annotation",
-                           cols = "polychrome"),
-       width = 6, height = 4)
-ggsave("png/cell_type_anno_QC.png",
-       plot = FeaturePlot(normal_srt, "secondary_expr_frac",
-                          reduction = "banksy0.2.umap") +
-              VlnPlot(normal_srt, "nFeature_Spatial",
-                      group.by = "celltype_annotation"),
-       width = 6, height = 4)
-ggsave("png/pearson_cell_type_anno_Dimplot.pdf",
-       plot = DimPlot(normal_srt, group.by = "celltype_annotation",
-                      cols = "polychrome", reduction = "pearsonumap"),
-       width = 6, height = 4)
-
-qs_save(normal_srt, "normal_srt.qs2")
-
-tryCatch(srt2anndata(normal_srt, save_name = "normal"),
-         error = function(e) message("srt2anndata(normal) failed: ", conditionMessage(e)))
-
-cat("===================== normal done ====================\n")

@@ -10,8 +10,8 @@ library(qs2)
 source("~/VisHD/functions.R")  # filter_artefacts_knn
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-paths   <- system("realpath ~/VisHD/LUT-245-*/tumour_anno_srt.qs2", intern = TRUE)
-slides  <- basename(dirname(paths))
+paths   <- system("realpath ~/VisHD/LUT-245-*/tumour/tumour_srt.qs2", intern = TRUE)
+slides  <- basename(dirname(dirname(paths)))
 out_dir <- path.expand("~/VisHD/4.5.integrate_tumour_anno")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 pearson_path <- file.path(out_dir, "integrated_pearson_srt.qs2")
@@ -45,6 +45,7 @@ if (file.exists(pearson_path)) {
     cat("    ", slides[i], ": ", n_before, " -> ", ncol(srt_full),
         " cells after kNN artefact filter\n", sep = "")
 
+    srt_full <- JoinLayers(srt_full, assay = "Spatial")
     counts   <- GetAssayData(srt_full, assay = "Spatial", layer = "counts")
     meta     <- srt_full@meta.data
     meta$slide <- slides[i]

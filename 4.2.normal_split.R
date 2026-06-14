@@ -1,200 +1,208 @@
 library(Seurat)
-source("~/VisHD/functions.R")
-source("~/VisHD/normal_markers.R")
 library(dplyr)
-library(SpaNorm, lib.loc = "~/R_Library/4.5")
+library(SpaNorm,     lib.loc = "~/R_Library/4.5")
 library(qs2)
-library(leidenbase, lib.loc = "~/R_Library/4.5")
-library(UCell, lib.loc = "~/R_Library/4.5")
+library(leidenbase,  lib.loc = "~/R_Library/4.5")
+library(UCell,       lib.loc = "~/R_Library/4.5")
 library(ggplot2)
-library(msigdbr)
+library(readxl)
 library(purrr)
+library(patchwork)
+library(msigdbr)
 library(stringr)
 
-args <- commandArgs(trailingOnly = TRUE)
-arg <- as.numeric(args[1])
+source("~/VisHD/functions.R")
+source("~/VisHD/normal_markers.R")
+source("~/VisHD/celltype_annotation_function.R")
 
-# Define file paths=========
-paths <- system("realpath ~/VisHD/LUT-245-*/", intern = T)
-path <- paths[arg]
-setwd(path)
-samples <- sapply(strsplit(paths, split = "/"), '[', 5)
-names(paths) <- samples
-i = samples[arg]
-cat("working at", path, "\n")
-
-srt_cell_filtered <- qs_read("tumour_anno_srt.qs2")
-
-# normal cells ========
-if (!file.exists("normal")){
-  dir.create("normal")
-}
-setwd("normal")
-
-tumour_srt <- subset(srt_cell_filtered, cells = colnames(srt_cell_filtered)[srt_cell_filtered$tumour_anno == "Normal"])
-tumour_srt <- do.spanorm(tumour_srt)
-tumour_srt <- tumour_srt %>% FindClusters(resolution = 0.8, algorithm = 4)
-spatial_plot(tumour_srt, outdir = "png/", name = "spanorm")
-qs_save(tumour_srt, "tumour_srt.qs2")
-cat("SpaNorm Done \n")
-
-tumour_srt <- SeuratWrappers::RunBanksy(tumour_srt, lambda = 0.2, verbose = TRUE, use_agf = TRUE,
-                                 assay = 'SpaNorm', slot = 'data',
-                                 k_geom = c(15), assay_name = 'BANKSY_0.2')
-tumour_srt <- RunPCA(tumour_srt, npcs = 30, features = rownames(tumour_srt), reduction.name = "banksy0.2.pca")
-tumour_srt <- RunUMAP(tumour_srt, dims = 1:20, reduction = "banksy0.2.pca", reduction.name  = "banksy0.2.umap")
-tumour_srt <-  FindNeighbors(tumour_srt, reduction = "banksy0.2.pca", dims = 1:20)
-tumour_srt <-   FindClusters(tumour_srt, resolution = 1, algorithm = 4)
-qs_save(tumour_srt, "tumour_srt.qs2")
-spatial_plot(tumour_srt, "png/", "Bansky_lam0.2")
-cat("BANKSY DONE \n")
-
-DefaultAssay(tumour_srt) <- "SpaNorm"
-DEG <- FindAllMarkers(tumour_srt, test.used = "MAST")
-saveRDS(DEG, "deg_spanorm.Rds")
-## pathway enrichment
+# ── Reference data ─────────────────────────────────────────────────────────
 Hall <- readRDS("~/VisHD/Hall.Rds")
-C6 <- readRDS("~/VisHD/C6.Rds")
-C5 <- readRDS("~/VisHD/C5.Rds")
-if (nrow(DEG) > 0) {
-  DEG <- DEG %>% filter(p_val_adj < 0.05) %>% arrange(desc(avg_log2FC))
+C6   <- readRDS("~/VisHD/C6.Rds")
+C5   <- readRDS("~/VisHD/C5.Rds")
+gene_sets <- list(Hallmark = Hall, C6 = C6, C5 = C5)
 
-  if (nrow(DEG) > 0) {
-    geneList <- lapply(split(DEG, DEG$cluster), function(x) setNames(x$avg_log2FC, x$gene))
+clean_module <- readRDS("~/VisHD/public_signature/clean_module.Rds")
+names(clean_module) <- c("AR", "Inflammation", "NE1", "NE2", "Cycling", "Glycolysis")
 
-    enrichlist <- lapply(list("Hallmark" = Hall, "C6" = C6, "C5" = C5), function(geneset) {
-      enrich <- lapply(names(geneList), function(cluster_name) {
-        x <- geneList[[cluster_name]]
-        tryCatch({
-          result <- clusterProfiler::GSEA(x, TERM2GENE = geneset)
-          return(result)
-        }, error = function(e) {
-          message(sprintf("Skipping cluster '%s': %s", cluster_name, conditionMessage(e)))
-          return(NULL)
-        }, warning = function(w) {
-          message(sprintf("Warning in cluster '%s': %s", cluster_name, conditionMessage(w)))
-          return(NULL)
-        })
-      })
-      names(enrich) <- names(geneList)
-      return(enrich)
-    })
+# Gavish et al. meta-programs (sheet → program → genes)
+meta_xlsx     <- "~/VisHD/public_signature/meta_programs_2025-01-29.xlsx"
+sheetname     <- excel_sheets(meta_xlsx)
+meta_programs <- set_names(sheetname, sheetname) %>%
+  map(~ read_excel(meta_xlsx, sheet = .x, col_names = TRUE)) %>%
+  map(~ map(.x, ~ as.character(na.omit(.x))))
 
-    saveRDS(enrichlist, "deg_enrich.Rds")
-    cat("ENRICHMENT DONE\n")
-  }
+# Seminal Vesicle Epithelial Cell markers (used in both halves)
+SVEC_marker <- c("SEMG1", "SEMG2", "MUC6", "PGC", "CYP4F8", "CLU", "PDK4",
+                 "SLPI", "AKR1B1", "KRT7", "SLC26A3", "PATE1", "PAX8")
+
+# ── TME cell-type annotation panels ────────────────────────────────────────
+# tme_markers: one vector per cell type — SVEC literature markers + union of
+# all Gavish meta-programs within each cell-type sheet.
+tme_markers <- c(
+  list(SVEC = SVEC_marker),
+  lapply(meta_programs, function(progs) unique(unlist(progs)))
+)
+
+# Map each tme_markers entry to a MSigDB C8 regex; unknown names fall back to
+# the cell-type label uppercased so the pipeline still gets a non-empty hit set.
+default_search <- function(nm) gsub("[^A-Z0-9]+", "_", toupper(nm))
+known_search_terms <- list(
+  SVEC          = "EPITHELIAL|SEMINAL_VESICLE",
+  `B cells`     = "B_CELL",
+  Endothelial   = "ENDOTHELIAL",
+  Epithelial    = "EPITHELIAL|MALIGNANT",
+  Fibroblasts   = "FIBROBLAST",
+  Macrophages   = "MACROPHAGE",
+  `CD4 T cells` = "CD4.*T_CELL",
+  `CD8 T cells` = "CD8.*T_CELL"
+)
+tme_search_terms <- setNames(
+  lapply(names(tme_markers), function(nm)
+    if (!is.null(known_search_terms[[nm]])) known_search_terms[[nm]] else default_search(nm)),
+  names(tme_markers)
+)
+
+# Cache MSigDB C8 (Cell Type Signatures) — network call on first run only.
+c8_cache <- "~/VisHD/public_signature/c8_data_human.Rds"
+c8_data <- if (file.exists(c8_cache)) {
+  readRDS(c8_cache)
 } else {
-  cat("no DEG found\n")
+  cat("Fetching MSigDB C8 collection...\n")
+  d <- msigdbr(species = "Homo sapiens", category = "C8")
+  saveRDS(d, c8_cache)
+  d
 }
-
-tumour_srt <- AddModuleScore(tumour_srt, all_marker)
-colnames(tumour_srt@meta.data)[colnames(tumour_srt@meta.data) %in% paste0("Cluster", 1:13)] <- names(all_marker)
-
-g <- ImageFeaturePlot(tumour_srt, names(all_marker), cols = c("white", "red"))
-ggsave("png/spanorm_ImageFeaturePlot_normal_score.png", plot = g, width = 25, height = 15, dpi = 350)
-
-g <- FeaturePlot(tumour_srt, names(all_marker), cols = c("white", "red"))
-ggsave("png/spanorm_FeaturePlot_normal_score.png", plot = g, width = 25, height = 15, dpi = 350)
-
-SVEC_marker <- c("SEMG1", "SEMG2", "MUC6", "PGC", "CYP4F8", "CLU", "PDK4", "SLPI", "AKR1B1", "KRT7", "SLC26A3", "PATE1", "PAX8")
-test <- FeaturePlot(tumour_srt, SVEC_marker, reduction = "banksy0.2.umap")
-ggsave(plot = test, "png/SVEC_marker.png", width = 12, height = 12)
-
-top5_genes <- DEG %>%
-    filter(p_val_adj < 0.05) %>%
-    filter(abs(pct.1 - pct.2) > 0.2) %>%
-    group_by(cluster) %>%
-    dplyr::slice_max(order_by = avg_log2FC, n = 5)
-f3 <- ImageFeaturePlot(tumour_srt, top5_genes$gene, size = 0.3)
-ggsave(plot = f3 + plot_layout(ncol = 5), paste0("png/", "spanorm_DEG_ImageFeaturePlot.png"), limitsize = FALSE, width = 15, height = 50, dpi = 350)
-
-f3 <- FeaturePlot(tumour_srt, top5_genes$gene)
-ggsave(plot = f3, paste0("png/", "spanorm_DEG_FeaturePlot.png"), limitsize = FALSE, width = 15, height = 30, dpi = 350)
-
-## Cell type annotation ========
-tme_markers <- list(
-  Epithelial  = c("EPCAM","KRT8","KRT18","CDH1","MUC1"),
-  T_Cells_Pan = c("CD3D","CD3E","CD3G","CD2"),
-  CD8_T       = c("CD8A","CD8B","GZMK","GZMB"),
-  CD4_T       = c("CD4","IL7R","LTB"),
-  Tregs       = c("FOXP3","IL2RA","IKZF2","BATF"),
-  B_Cells     = c("CD19","MS4A1","CD79A"),
-  Plasma      = c("JCHAIN","MZB1","SDC1"),
-  NK_Cells    = c("NCAM1","KLRB1","NKG7","GNLY"),
-  Myeloid_Pan = c("CD14","LYZ","CD68","CSF1R"),
-  TAMs        = c("CD163","MRC1","APOE","C1QA"),
-  DCs         = c("HLA-DRA","CD1C","CLEC9A","THBD"),
-  CAFs        = c("COL1A1","DCN","LUM","FAP","ACTA2"),
-  Endothelial = c("PECAM1","VWF","ENG","CLDN5"),
-  Pericytes   = c("RGS5","MCAM","CSPG4")
-)
-
-secondary_markers <- list(
-  Epithelial_broad = c("EPCAM","KRT5","KRT14","KRT17","KRT19","CLDN4","OCLN",
-                       "TJP1","GJB2","GRHL2","ESRP1","ELF3"),
-  Immune_broad     = c("PTPRC","HLA-A","HLA-B","HLA-C","B2M","LAPTM5",
-                       "TYROBP","FCER1G","LST1","AIF1"),
-  Stromal_broad    = c("VIM","FN1","THY1","S100A4","COL3A1","PDGFRA",
-                       "PDGFRB","SPARC","POSTN","IGFBP3","IGFBP4"),
-  Myeloid_broad    = c("CD14","ITGAM","ITGAX","CX3CR1","CSF1R","FCGR3A",
-                       "S100A8","S100A9","VCAN","FCN1","LILRB2"),
-  Lymphoid_broad   = c("CD3D","CD3E","CD19","MS4A1","NCAM1","IL2RA",
-                       "CD27","CD38","SELL","CCR7","IL7R")
-)
-
-cat("Fetching MSigDB C8 collection...\n")
-c8_data <- msigdbr(species = "Homo sapiens", category = "C8")
-
-tme_search_terms <- list(
-  Epithelial  = "EPITHELIAL|MALIGNANT",
-  T_Cells_Pan = "T_CELL(?!.*(CD4|CD8|REGULATORY))",
-  CD8_T       = "CD8.*T_CELL",
-  CD4_T       = "CD4.*T_CELL",
-  Tregs       = "REGULATORY_T_CELL|TREG",
-  B_Cells     = "B_CELL",
-  Plasma      = "PLASMA_CELL",
-  NK_Cells    = "NK_CELL|NATURAL_KILLER",
-  Myeloid_Pan = "MYELOID",
-  TAMs        = "MACROPHAGE",
-  DCs         = "DENDRITIC_CELL|DC",
-  CAFs        = "FIBROBLAST",
-  Endothelial = "ENDOTHELIAL",
-  Pericytes   = "PERICYTE"
-)
 
 extract_c8_genes <- function(df, search_pattern) {
   df %>%
     filter(str_detect(gs_name, regex(search_pattern, ignore_case = TRUE))) %>%
-    pull(gene_symbol) %>%
-    unique()
+    pull(gene_symbol) %>% unique()
 }
+c8_tme_markers <- map(tme_search_terms, ~ extract_c8_genes(c8_data, .x))
 
-c8_tme_markers <- map(tme_search_terms, ~extract_c8_genes(c8_data, .x))
-source("~/VisHD/celltype_annotation_function.R")
-tumour_srt <- tme_cluster_annotation_pipeline(
-  obj                 = tumour_srt,
-  tme_markers         = tme_markers,
-  secondary_genes     = c8_tme_markers,
-  cluster_col         = "seurat_clusters",
-  assay               = "SpaNorm",
-  data_slot           = "data",
-  expr_min_val        = 0,
-  primary_expr_frac   = 0.05,
-  secondary_expr_frac = 0.01,
-  min_markers         = 3,
-  conf_threshold      = 0.2,
-  exclusivity_weight  = 0.30,
-  detection_min       = 0.01,
-  trim                = 0.10
+# ── CLI args ───────────────────────────────────────────────────────────────
+args <- commandArgs(trailingOnly = TRUE)
+if (length(args) == 0 || is.na(suppressWarnings(as.numeric(args[1])))) {
+  stop("Usage: Rscript 4.1.tumour_normal_split.R <sample-index>")
+}
+arg <- as.numeric(args[1])
+
+paths <- system("realpath ~/VisHD/LUT-245-*/", intern = TRUE)
+path  <- paths[arg]
+i     <- basename(path)
+cat("working at", path, "\n")
+
+tumour_dir <- file.path(path, "tumour")
+normal_dir <- file.path(path, "normal")
+if (!dir.exists(tumour_dir)) dir.create(tumour_dir, recursive = TRUE)
+if (!dir.exists(normal_dir)) dir.create(normal_dir, recursive = TRUE)
+
+srt_cell_filtered <- qs_read(file.path(path, "tumour_subclone_srt.qs2"))
+
+# ── Normal cells ───────────────────────────────────────────────────────────
+setwd(normal_dir)
+normal_srt <- subset(srt_cell_filtered, subset = tumour_anno == "Normal")
+normal_srt <- do.spanorm(normal_srt)
+normal_srt <- do.pearson_pca(normal_srt)
+normal_srt <- FindClusters(normal_srt, resolution = 0.8, algorithm = 4)
+spatial_plot(normal_srt, outdir = "png/", name = "spanorm")
+qs_save(normal_srt, "normal_srt.qs2")
+cat("SpaNorm Done\n")
+
+normal_srt <- SeuratWrappers::RunBanksy(normal_srt, lambda = 0.2, verbose = TRUE,
+                                        use_agf = TRUE, assay = "SpaNorm", slot = "data",
+                                        k_geom = c(15), assay_name = "BANKSY_0.2")
+normal_srt <- RunPCA(normal_srt, npcs = 30, features = rownames(normal_srt),
+                     reduction.name = "banksy0.2.pca")
+normal_srt <- RunUMAP(normal_srt, dims = 1:20, reduction = "banksy0.2.pca",
+                      reduction.name = "banksy0.2.umap")
+normal_srt <- FindNeighbors(normal_srt, reduction = "banksy0.2.pca", dims = 1:20)
+normal_srt <- FindClusters(normal_srt, resolution = 1, algorithm = 4)
+qs_save(normal_srt, "normal_srt.qs2")
+spatial_plot(normal_srt, outdir = "png/", name = "Bansky_lam0.2")
+cat("BANKSY DONE\n")
+
+DefaultAssay(normal_srt) <- "SpaNorm"
+DEG_n <- FindAllMarkers(normal_srt, test.use = "MAST")
+saveRDS(DEG_n, "deg_spanorm.Rds")
+run_gsea_panel(DEG_n, gene_sets, "deg_enrich.Rds")
+
+normal_srt <- AddModuleScore(normal_srt, features = all_marker, name = "ct_")
+added <- paste0("ct_", seq_along(all_marker))
+colnames(normal_srt@meta.data)[match(added, colnames(normal_srt@meta.data))] <-
+  names(all_marker)
+
+ggsave("png/spanorm_ImageFeaturePlot_normal_score.png",
+       plot = ImageFeaturePlot(normal_srt, names(all_marker), cols = c("white", "red")),
+       width = 25, height = 15, dpi = 350)
+ggsave("png/spanorm_FeaturePlot_normal_score.png",
+       plot = FeaturePlot(normal_srt, names(all_marker), cols = c("white", "red")),
+       width = 25, height = 15, dpi = 350)
+ggsave("png/pearson_FeaturePlot_normal_score.png",
+       plot = FeaturePlot(normal_srt, names(all_marker), cols = c("white", "red"),
+                          reduction = "pearsonumap"),
+       width = 25, height = 15, dpi = 350)
+
+# Gavish meta-programs (drop Malignant sheet for normal cells)
+normal_srt <- score_meta_programs(
+  normal_srt,
+  meta_programs[setdiff(names(meta_programs), "Malignant")],
+  out_dir = "png"
 )
 
-g <- DimPlot(tumour_srt, group.by= "celltype_annotation", cols = "polychrome", reduction= "banksy0.2.umap")
-ggsave(plot = g, "png/cell_type_anno_Dimplot.pdf", width = 6, height = 4)
-g <- ImageDimPlot(tumour_srt, group.by= "celltype_annotation", cols = "polychrome")
-ggsave(plot = g, "png/cell_type_anno_ImageDimplot.png", width = 6, height = 4)
-g <- FeaturePlot(tumour_srt, "secondary_expr_frac", reduction= "banksy0.2.umap") + VlnPlot(tumour_srt, "nFeature_Spatial", group.by = "celltype_annotation")
-ggsave(plot = g, "png/cell_type_anno_QC.png", width = 6, height = 4)
-qs_save(tumour_srt, "normal_srt.qs2")
+ggsave("png/SVEC_marker.png",
+       plot = FeaturePlot(normal_srt, SVEC_marker, reduction = "banksy0.2.umap"),
+       width = 12, height = 12)
+ggsave("png/pearson_SVEC_marker.png",
+       plot = FeaturePlot(normal_srt, SVEC_marker, reduction = "pearsonumap"),
+       width = 12, height = 12)
 
-srt2anndata(tumour_srt, save_name = 'normal')
-cat("All Done\n")
+plot_top_deg(normal_srt, DEG_n %>% filter(p_val_adj < 0.05),
+             out_dir = "png", prefix = "spanorm_DEG")
+
+# ── Cluster cell-type annotation ───────────────────────────────────────────
+if (!"celltype_annotation" %in% colnames(normal_srt@meta.data)) {
+  normal_srt <- tme_cluster_annotation_pipeline(
+    obj                 = normal_srt,
+    tme_markers         = tme_markers,
+    secondary_genes     = c8_tme_markers,
+    cluster_col         = "pearson_clusters",
+    assay               = "SpaNorm",
+    data_slot           = "data",
+    expr_min_val        = 0,
+    primary_expr_frac   = 0.05,
+    secondary_expr_frac = 0.01,
+    min_markers         = 3,
+    conf_threshold      = 0.2,
+    exclusivity_weight  = 0.30,
+    detection_min       = 0.01,
+    trim                = 0.10
+  )
+  qs_save(normal_srt, "normal_srt.qs2")
+}
+
+ggsave("png/cell_type_anno_Dimplot.pdf",
+       plot = DimPlot(normal_srt, group.by = "celltype_annotation",
+                      cols = "polychrome", reduction = "banksy0.2.umap"),
+       width = 6, height = 4)
+ggsave("png/cell_type_anno_ImageDimplot.png",
+       plot = ImageDimPlot(normal_srt, group.by = "celltype_annotation",
+                           cols = "polychrome"),
+       width = 6, height = 4)
+ggsave("png/cell_type_anno_QC.png",
+       plot = FeaturePlot(normal_srt, "secondary_expr_frac",
+                          reduction = "banksy0.2.umap") +
+              VlnPlot(normal_srt, "nFeature_Spatial",
+                      group.by = "celltype_annotation"),
+       width = 6, height = 4)
+ggsave("png/pearson_cell_type_anno_Dimplot.pdf",
+       plot = DimPlot(normal_srt, group.by = "celltype_annotation",
+                      cols = "polychrome", reduction = "pearsonumap"),
+       width = 6, height = 4)
+
+qs_save(normal_srt, "normal_srt.qs2")
+
+tryCatch(srt2anndata(normal_srt, save_name = "normal"),
+         error = function(e) message("srt2anndata(normal) failed: ", conditionMessage(e)))
+
+cat("===================== normal done ====================\n")

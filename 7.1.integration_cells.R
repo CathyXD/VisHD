@@ -9,7 +9,7 @@ library(qs,          lib.loc = "~/R_Library/4.5")
 library(qs2)
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-paths   <- system("realpath ~/VisHD/LUT-245-*/tumour_anno_srt.qs2", intern = TRUE)
+paths   <- system("realpath ~/VisHD/LUT-245-*/tumour_subclone_srt.qs2", intern = TRUE)
 slides  <- basename(dirname(paths))
 out_dir <- path.expand("~/VisHD/integration")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
@@ -24,6 +24,7 @@ module_names <- names(archetype_module)
 module_cols  <- module_names
 
 # ── Normal / tumour marker gene sets ──────────────────────────────────────
+source("~/VisHD/functions.R")      # srt2anndata
 source("~/VisHD/normal_markers.R")
 tumour_markers <- c("KLK2", "KLK3", "KLK4", "TMPRSS2", "FOLH1", "NKX3-1", "HOXB13", "TRPM8")
 ucell_names <- c("tumour_score", "normal_score")
@@ -38,6 +39,8 @@ if (file.exists(pearson_path)) {
   srt_list <- lapply(seq_along(paths), function(i) {
     cat("  Loading", slides[i], "\n")
     srt_full <- qs_read(paths[i])
+    srt_full <- subset(srt_full, subset = tumour_anno != "Removed")
+    srt_full <- JoinLayers(srt_full, assay = "Spatial")
     counts   <- GetAssayData(srt_full, assay = "Spatial", layer = "counts")
     meta     <- srt_full@meta.data
     meta$slide <- slides[i]
@@ -53,6 +56,7 @@ if (file.exists(pearson_path)) {
   cat("Merged:", ncol(srt), "cells\n")
 
   DefaultAssay(srt) <- "Spatial"
+  srt <- JoinLayers(srt, assay = "Spatial")
   srt <- NormalizeData(srt)
 
   srt <- AddModuleScore(srt, features = archetype_module, name = "module_score")

@@ -1,16 +1,15 @@
 #!/bin/bash -l
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=80G
-#SBATCH --time=3:00:00
-#SBATCH --job-name=DT_deg
-#SBATCH --array=1-8
-#SBATCH --output="slurmout/5.1.DT_deg-%j-%a.out"
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=150G
+#SBATCH --time=5:00:00
+#SBATCH --job-name=deseq2_integrate
+#SBATCH --output="slurmout/5.2.integrate_DESeq2_deg-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
-#SBATCH --partition=work
 #SBATCH --account=pawsey1172
+#SBATCH --partition=work
 
 dir="${MYSCRATCH}"
 image="docker://swweng/spatial:4.5v6"
@@ -27,9 +26,9 @@ tmp_dir="/tmp/tmp_$USER"
 mkdir -p $tmp_dir
 
 srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
-singularity exec -c \
--B ${tmp_dir}:/tmp \
--B ${dir}:$HOME \
--B ${tmp_dir}:/var \
-${imagename} \
-Rscript ~/VisHD/5.1.0.DT_deg.R "$SLURM_ARRAY_TASK_ID"
+  singularity exec -c \
+  -B ${tmp_dir}:/tmp \
+  -B ${dir}:$HOME \
+  -B ${tmp_dir}:/var \
+  ${imagename} \
+  Rscript ~/VisHD/5.2.integrate_DESeq2_deg.R

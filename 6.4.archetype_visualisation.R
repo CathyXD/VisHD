@@ -21,7 +21,6 @@ suppressPackageStartupMessages({
   library(circlize)
   library(RColorBrewer)
   library(patchwork)
-  library(qs,  lib.loc = "~/R_Library/4.5")
   library(qs2)
 })
 

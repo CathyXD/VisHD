@@ -1,13 +1,15 @@
 #!/usr/bin/env Rscript
 # 6.2archetype_downstream.R
 # Cross-sample downstream analysis of archetypal analysis results.
-# Reads per-sample archetype_result/ CSVs and h5ad files, then:
-#   - Converts AnnData → Seurat v5 (per sample)
+# Reads per-sample archetype_result/ CSVs + native tumour_srt.qs2, then:
 #   - Aggregates archetype expression and pathway enrichment across all 8 samples
 #   - Computes archetype–archetype correlations (expression + pathway)
 #   - Derives recurrent gene expression modules via hierarchical clustering
 #   - Produces ComplexHeatmap visualisations
-# Output: VisHD/archetype_downstream/
+#   - Imports per-cell archetype weights + argmax group into each tumour Seurat,
+#     scores each archetype's top DE genes (AddModuleScore), and renders
+#     cross-sample spatial maps (ImageDimPlot/ImageFeaturePlot); exports metadata
+# Output: VisHD/6.2archetype_downstream_tumour/
 
 suppressPackageStartupMessages({
   library(tidyverse)
@@ -17,7 +19,8 @@ suppressPackageStartupMessages({
   library(jsonlite)
   library(Seurat)
   library(SeuratObject)
-  library(anndataR, lib.loc = "~/R_Library/4.5")
+  library(patchwork)
+  library(qs2)
 })
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -31,53 +34,27 @@ dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 top_n_genes  <- 50    # genes per archetype for module discovery
 k_modules    <- 4     # number of recurrent archetype modules to cut
 n_display    <- 15    # top genes per module shown in heatmap
+top_n_de     <- 30    # top per-archetype DE genes used for AddModuleScore
 
-# ── Helper: AnnData → Seurat v5 ───────────────────────────────────────────────
-h5ad_to_seurat <- function(h5ad_path) {
-  adata <- anndataR::read_h5ad(h5ad_path)
+# Per-cell archetype spatial figures go in a sub-dir
+spdir <- file.path(outdir, "spatial")
+dir.create(spdir, showWarnings = FALSE, recursive = TRUE)
 
-  # Raw counts (cells × genes → genes × cells)
-  counts <- t(as.matrix(adata$layers[["counts"]]))
-  rownames(counts) <- adata$var_names
-  colnames(counts) <- adata$obs_names
-
-  # SpaNorm log-normalised data
-  lognorm <- t(as.matrix(adata$X))
-  rownames(lognorm) <- adata$var_names
-  colnames(lognorm) <- adata$obs_names
-
-  srt <- CreateSeuratObject(counts = counts, project = basename(dirname(h5ad_path)))
-
-  # Add normalised assay layer
-  srt[["Spatial"]] <- CreateAssay5Object(counts = counts, data = lognorm)
-  DefaultAssay(srt) <- "Spatial"
-
-  # Cell metadata (obs)
-  meta_cols <- setdiff(colnames(adata$obs), colnames(srt@meta.data))
-  srt <- AddMetaData(srt, metadata = adata$obs[, meta_cols, drop = FALSE])
-
-  # Dimensionality reductions
-  if (!is.null(adata$obsm[["X_pca"]])) {
-    pca_mat <- as.matrix(adata$obsm[["X_pca"]])
-    rownames(pca_mat) <- adata$obs_names
-    srt[["pca"]] <- CreateDimReducObject(embeddings = pca_mat, key = "PC_", assay = "Spatial")
-  }
-  if (!is.null(adata$obsm[["X_umap"]])) {
-    umap_mat <- as.matrix(adata$obsm[["X_umap"]])
-    rownames(umap_mat) <- adata$obs_names
-    colnames(umap_mat) <- c("UMAP_1", "UMAP_2")
-    srt[["umap"]] <- CreateDimReducObject(embeddings = umap_mat, key = "UMAP_", assay = "Spatial")
-  }
-
-  srt
-}
+# Archetype colour palette (supports up to 8 per-sample archetypes)
+max_arch  <- 8
+arch_cols <- setNames(brewer.pal(max_arch, "Set1"), paste0("Archetype_", 0:(max_arch - 1)))
 
 # ── 1. Load per-sample results ─────────────────────────────────────────────────
 arch_expr_list    <- list()
 pw_est_list       <- list()
 pw_pval_list      <- list()
 arch_idx_top_vec  <- c()
-seurat_list       <- list()
+
+# Per-cell archetype accumulators (filled in the per-sample loop below)
+group_plots  <- list()   # ImageDimPlot of archetype_group, one per sample
+weight_plots <- list()   # weight_plots[[archetype_idx]][[sample]] — cell-weight maps
+score_plots  <- list()   # score_plots[[archetype_idx]][[sample]]  — DEG module scores
+meta_list    <- list()   # per-sample archetype meta.data for export
 
 for (i in seq_along(samples)) {
   s          <- samples[i]
@@ -86,7 +63,6 @@ for (i in seq_along(samples)) {
   expr_f  <- file.path(result_dir, "archetype_expression.csv")
   pw_e_f  <- file.path(result_dir, "pathway_enrichment_est.csv")
   pw_p_f  <- file.path(result_dir, "pathway_enrichment_pval.csv")
-  h5ad_f  <- file.path(result_dir, "archetype_adata.h5ad")
   top_f   <- file.path(result_dir, "arch_idx_top.json")
 
   if (!file.exists(expr_f)) {
@@ -113,21 +89,79 @@ for (i in seq_along(samples)) {
     arch_idx_top_vec[s] <- paste0(s, "_A", top_info$arch_idx_top)
   }
 
-  # AnnData → Seurat (force conversion)
-  if (file.exists(h5ad_f)) {
-    srt_cache <- file.path(result_dir, "seurat_from_h5ad.rds")
-    if (TRUE) {
-      message("Loading cached Seurat for ", s, " ...")
-      seurat_list[[s]] <- readRDS(srt_cache)
-    } else {
-      message("Converting ", s, " h5ad → Seurat ...")
-      seurat_list[[s]] <- tryCatch(h5ad_to_seurat(h5ad_f), error = function(e) {
-        message("  Skipped (", conditionMessage(e), ")")
-        NULL
-      })
-      if (!is.null(seurat_list[[s]])) saveRDS(seurat_list[[s]], srt_cache)
-    }
+  # ── Per-cell archetype import + spatial visualisation ──────────────────────
+  # K (chosen archetype count) = number of per-archetype DE tables; the matching
+  # per-cell weights live in AA_cell_weights_n{K}.csv.
+  tumour_srt_f <- file.path(base_dir, s, "tumour", "tumour_srt.qs2")
+  K           <- length(list.files(result_dir, pattern = "^DE_Archetype_[0-9]+_vs_rest\\.csv$"))
+  weights_f   <- file.path(result_dir, sprintf("AA_cell_weights_n%d.csv", K))
+
+  if (K == 0 || !file.exists(tumour_srt_f) || !file.exists(weights_f)) {
+    message("  Skipping per-cell archetype import for ", s,
+            " — missing tumour_srt.qs2 or AA_cell_weights_n", K, ".csv")
+    next
   }
+
+  message("Reading tumour_srt.qs2 for ", s, " (K=", K, " archetypes) ...")
+  srt <- qs_read(tumour_srt_f)
+
+  # AA weights are written in adata/tumour_srt cell order (their integer obs_names
+  # are positional labels, not barcodes) → align by position to the Seurat cells.
+  w <- read.csv(weights_f, row.names = 1, check.names = FALSE)
+  if (nrow(w) != ncol(srt)) {
+    message("  ", s, ": weight rows (", nrow(w), ") != cells (", ncol(srt),
+            ") — skipping archetype import")
+    rm(srt); gc(); next
+  }
+  w_norm <- as.data.frame(w / rowSums(w))          # column-normalised → per-cell membership
+  w_cols <- paste0("archW_", 0:(K - 1))
+  colnames(w_norm) <- w_cols
+  rownames(w_norm) <- colnames(srt)
+  srt <- AddMetaData(srt, w_norm)
+  srt$archetype_group <- factor(paste0("Archetype_", max.col(w_norm) - 1),
+                                levels = paste0("Archetype_", 0:(K - 1)))
+
+  # AddModuleScore from each archetype's top DE genes (per sample)
+  score_assay <- if ("SpaNorm" %in% Assays(srt)) "SpaNorm" else "Spatial"
+  DefaultAssay(srt) <- score_assay
+  if (score_assay == "Spatial") srt <- NormalizeData(srt, verbose = FALSE)
+
+  score_cols <- character(0)
+  for (i in 0:(K - 1)) {
+    de    <- read.csv(file.path(result_dir, sprintf("DE_Archetype_%d_vs_rest.csv", i)),
+                      check.names = FALSE)
+    de    <- de[!grepl("^MT-", de$names) & de$pvals_adj < 0.05 & de$logfoldchanges > 0, ]
+    de    <- de[order(-de$scores), ]
+    genes <- intersect(head(de$names, top_n_de), rownames(srt))
+    if (length(genes) < 2) next
+    srt <- AddModuleScore(srt, features = list(genes), name = sprintf("archDEG_%d", i))
+    names(srt@meta.data)[names(srt@meta.data) == sprintf("archDEG_%d1", i)] <-
+      sprintf("archDEG_%d", i)
+    score_cols <- c(score_cols, sprintf("archDEG_%d", i))
+  }
+
+  # Per-sample spatial plots (FOV-based Visium HD → Image* family)
+  group_plots[[s]] <- ImageDimPlot(srt, group.by = "archetype_group",
+                                   cols = arch_cols, size = 0.4) +
+    ggtitle(s) + theme(plot.title = element_text(size = 9), legend.position = "right")
+
+  for (i in 0:(K - 1)) {
+    weight_plots[[as.character(i)]][[s]] <-
+      ImageFeaturePlot(srt, features = sprintf("archW_%d", i), size = 0.4) +
+      ggtitle(paste0(s, "  A", i, " weight")) + theme(plot.title = element_text(size = 8))
+    sc <- sprintf("archDEG_%d", i)
+    if (sc %in% colnames(srt@meta.data))
+      score_plots[[as.character(i)]][[s]] <-
+        ImageFeaturePlot(srt, features = sc, size = 0.4) +
+        ggtitle(paste0(s, "  A", i, " DEG score")) + theme(plot.title = element_text(size = 8))
+  }
+
+  # Collect archetype metadata for export, then free the object
+  md         <- srt@meta.data[, c("archetype_group", w_cols, score_cols), drop = FALSE]
+  md$barcode <- rownames(md)
+  md$slide   <- s
+  meta_list[[s]] <- md
+  rm(srt); gc()
 }
 
 # ── 2. Aggregate across samples ───────────────────────────────────────────────
@@ -432,6 +466,36 @@ module_df <- data.frame(
 write.csv(module_df, file.path(outdir, "archetype_module_assignments.csv"), row.names = FALSE)
 
 saveRDS(recurrent_modules, file.path(outdir, "recurrent_modules.Rds"))
-if (length(seurat_list) > 0) saveRDS(seurat_list, file.path(outdir, "seurat_list.Rds"))
+
+# ── 12. Per-cell archetype spatial maps + metadata export ─────────────────────
+# NOTE: archetype indices are NOT aligned across samples (archetypes are fit
+# per-sample), so each per-archetype grid shows that sample's own A{i}.
+if (length(group_plots) > 0) {
+  ggsave(file.path(spdir, "6_archetype_group_spatial_allsamples.png"),
+         wrap_plots(group_plots, ncol = 4),
+         width = 22, height = 11, dpi = 150, limitsize = FALSE)
+}
+
+arch_idx_all <- sort(unique(as.integer(c(names(weight_plots), names(score_plots)))))
+for (i in arch_idx_all) {
+  wp <- weight_plots[[as.character(i)]]
+  if (length(wp) > 0)
+    ggsave(file.path(spdir, sprintf("7_archetype%d_weight_spatial_allsamples.png", i)),
+           wrap_plots(wp, ncol = 4), width = 22, height = 11, dpi = 150, limitsize = FALSE)
+  sp <- score_plots[[as.character(i)]]
+  if (length(sp) > 0)
+    ggsave(file.path(spdir, sprintf("8_archetype%d_DEGscore_spatial_allsamples.png", i)),
+           wrap_plots(sp, ncol = 4), width = 22, height = 11, dpi = 150, limitsize = FALSE)
+}
+
+# Archetype metadata imported into each per-sample Seurat object
+if (length(meta_list) > 0) {
+  write.csv(dplyr::bind_rows(meta_list),
+            file.path(outdir, "archetype_cell_metadata_all_samples.csv"), row.names = FALSE)
+  saveRDS(meta_list, file.path(outdir, "archetype_cell_metadata.Rds"))
+  for (s in names(meta_list))
+    write.csv(meta_list[[s]],
+              file.path(outdir, sprintf("archetype_cell_metadata_%s.csv", s)), row.names = FALSE)
+}
 
 message("\nDone. Results saved to ", outdir)

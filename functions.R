@@ -844,7 +844,13 @@ srt2anndata <- function(srt,
     cat(sum(var_df$highly_variable), "SVGs (fdr<0.05) marked as highly_variable\n")
     write.csv(svgs_df, sub("\\.Rds$", ".csv", svg_path), row.names = TRUE)
   } else {
-    cat("SVGs.Rds not found at", svg_path, "— highly_variable set to FALSE\n")
+    # No SVGs supplied: fall back to the variable features of the data assay.
+    hvg <- tryCatch(VariableFeatures(srt, assay = data_assay),
+                    error = function(e) character(0))
+    var_df$highly_variable <- gene_names %in% hvg
+    cat("No SVGs supplied —", sum(var_df$highly_variable),
+        "variable features from assay '", data_assay,
+        "' marked as highly_variable\n", sep = "")
   }
 
   # 5. Spatial coords → obsm[['spatial']] (Squidpy/Scanpy convention).

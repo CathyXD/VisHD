@@ -5,9 +5,14 @@ library(dplyr)
 library(tidyr)
 library(data.table)
 library(scPearsonPCA, lib.loc = "~/R_Library/4.5")
-library(qs,          lib.loc = "~/R_Library/4.5")
 library(qs2)
-source("~/VisHD/functions.R")  # filter_artefacts_knn
+source("~/VisHD/functions.R")  # filter_artefacts_knn, do.pearson_pca
+
+RES <- 1.0   # clustering resolution on the batch-corrected Pearson graph
+
+# SCTransform/FindAllMarkers parallelise via future; the merged object's globals
+# exceed the 500 MiB default. Raise the cap (node has 150G).
+options(future.globals.maxSize = 8 * 1024^3)
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 paths   <- system("realpath ~/VisHD/LUT-245-*/tumour/tumour_srt.qs2", intern = TRUE)
@@ -34,7 +39,7 @@ if (file.exists(pearson_path)) {
   cat("Loading precomputed integrated srt from:", pearson_path, "\n")
   srt <- qs_read(pearson_path)
 } else {
-  # ── Load, per-slide kNN artefact filter, then build merge-ready minis ────
+  # ── 1. Load, per-slide kNN artefact filter, then build merge-ready minis ──
   cat("Loading and merging", length(paths), "slides...\n")
   srt_list <- lapply(seq_along(paths), function(i) {
     cat("  Loading", slides[i], "\n")
@@ -63,70 +68,39 @@ if (file.exists(pearson_path)) {
   DefaultAssay(srt) <- "Spatial"
   srt <- JoinLayers(srt, assay = "Spatial")
 
-  # ── Post-merge QC filter ────────────────────────────────────────────────
-  ca_lo <- quantile(srt$cell_area, 0.05, na.rm = TRUE)
-  ca_hi <- quantile(srt$cell_area, 0.99, na.rm = TRUE)
-  keep  <- srt$nFeature_Spatial > 20 &
-           srt$nCount_Spatial   > 50 &
-           srt$cell_area >  ca_lo &
-           srt$cell_area <  ca_hi
-  srt <- subset(srt, cells = colnames(srt)[which(keep)])
-  cat("After QC filter (nFeature>20, nCount>50, cell_area in [Q5, Q99]):", ncol(srt), "cells\n")
-
+  # ── 2. Log-normalize + archetype module scores ───────────────────────────
   srt <- NormalizeData(srt)
 
-  srt <- AddModuleScore(srt, features = archetype_module, name = "module_score")
+  # ── 3. SCTransform -> HVGs on the SCT assay ───────────────────────────────
+  DefaultAssay(srt) <- "Spatial"
+  srt <- SCTransform(srt, assay = "Spatial", method = "glmGamPoi",
+                     variable.features.n = 3000, verbose = FALSE)
+  hvg_sct <- VariableFeatures(srt, assay = "SCT")
+  # Pearson PCA runs on raw Spatial counts; keep only HVGs present there.
+  spatial_genes <- rownames(GetAssayData(srt, assay = "Spatial", layer = "counts"))
+  hvg <- intersect(hvg_sct, spatial_genes)
+  VariableFeatures(srt, assay = "Spatial") <- hvg
+  cat("\nSCT HVGs:", length(hvg_sct), "-> usable on Spatial:", length(hvg), "\n")
+
+   srt <- AddModuleScore(srt, features = archetype_module, name = "module_score")
   old_cols <- paste0("module_score", seq_along(module_names))
   colnames(srt@meta.data)[match(old_cols, colnames(srt@meta.data))] <- module_names
 
-  # ── Pearson residual PCA ─────────────────────────────────────────────────
-  counts_mat <- GetAssayData(srt, assay = "Spatial", layer = "counts")
-  tc         <- Matrix::colSums(counts_mat)
-  srt        <- FindVariableFeatures(srt, nfeatures = 8000)
-  hvgs       <- VariableFeatures(srt)
-
-  # Without batch correction
-  pcaobj <- sparse_quasipoisson_pca_seurat(
-    counts_mat[hvgs, ],
-    totalcounts = tc,
-    grate       = gene_frequency(counts_mat)[hvgs],
-    scale.max   = 10, do.scale = TRUE, do.center = TRUE
-  )
-  umapobj <- make_umap(pcaobj)
-  srt[["pearsonpca"]]   <- pcaobj$reduction.data
-  srt[["pearsonumap"]]  <- umapobj$ump
-  srt[["pearsongraph"]] <- Seurat::as.Graph(umapobj$grph)
-  srt <- FindClusters(srt, graph = "pearsongraph")
-  srt@meta.data$pearson_clusters <- srt@meta.data$seurat_clusters
-
-  # With batch correction (batch = "slide")
-  srt@meta.data$cell_ID <- rownames(srt@meta.data)
-  obs <- data.table(srt@meta.data)[, .(cell_ID, slide)]
-
-  genefreq_batch <- gene_frequency(
-    counts_mat,
-    obs            = obs,
-    cellid_colname = "cell_ID",
-    batch_variable = "slide"
-  )
-  pcaobj_batch <- sparse_quasipoisson_pca_seurat_batch(
-    counts_mat[hvgs, ],
-    totalcounts    = tc,
-    grate          = genefreq_batch[hvgs, ],
-    obs            = obs,
-    batch_variable = "slide",
-    cellid_colname = "cell_ID",
-    scale.max      = 10, do.scale = TRUE, do.center = TRUE
-  )
-  umapobj_batch <- make_umap(pcaobj_batch)
-  srt[["pearsonbatchpca"]]   <- pcaobj_batch$reduction.data
-  srt[["pearsonbatchumap"]]  <- umapobj_batch$ump
-  srt[["pearsonbatchgraph"]] <- Seurat::as.Graph(umapobj_batch$grph)
-  srt <- FindClusters(srt, graph = "pearsonbatchgraph")
-  srt@meta.data$pearson_clusters_batch <- srt@meta.data$seurat_clusters
+  # ── 4. Batch-corrected Pearson PCA (by slide) + UMAP + clusters ───────────
+  # Builds pearsonbatchpca / pearsonbatchumap / pearsonbatchgraph and
+  # pearson_clusters_batch from the SCT-HVG embedding (no no-batch path).
+  DefaultAssay(srt) <- "Spatial"
+  srt <- do.pearson_pca(srt, batch_variable = "slide", assay = "Spatial",
+                        find_hvgs = FALSE, reduction_prefix = "pearsonbatch",
+                        clusters_col = "pearson_clusters_batch", resolution = RES)
+  Idents(srt) <- "pearson_clusters_batch"
+  n_clu <- nlevels(factor(srt$pearson_clusters_batch))
+  cat("Batch-corrected Pearson clustering (res", RES, "):", n_clu, "clusters\n")
 
   qs_save(srt, pearson_path)
 }
+
+DefaultAssay(srt) <- "SCT"
 
 # ── Tumour / normal module scores ──────────────────────────────────────────
 if (!"tumour_score" %in% colnames(srt@meta.data)) {
@@ -139,12 +113,31 @@ if (!"tumour_score" %in% colnames(srt@meta.data)) {
   qs_save(srt, pearson_path)
 }
 
+# ── 5. DE between clusters with MAST (up-regulated markers) ─────────────────
+mast_path <- file.path(out_dir, "FindAllMarkers_MAST.Rds")
+if (!file.exists(mast_path)) {
+  DefaultAssay(srt) <- "Spatial"
+  srt <- NormalizeData(srt, assay = "Spatial", verbose = FALSE)
+  Idents(srt) <- "pearson_clusters_batch"
+  markers <- FindAllMarkers(srt, assay = "Spatial", test.use = "MAST",
+                            only.pos = TRUE, logfc.threshold = 0.25,
+                            min.pct = 0.1, max.cells.per.ident = 1000,
+                            verbose = FALSE)
+  saveRDS(markers, mast_path)
+  write.csv(markers, file.path(out_dir, "FindAllMarkers_MAST.csv"), row.names = FALSE)
+
+  sig_deg <- markers %>% filter(p_val_adj < 0.05, avg_log2FC > 0.25)
+  write.csv(sig_deg, file.path(out_dir, "significant_DEGs.csv"), row.names = FALSE)
+  cat("Significant up-DEGs (padj<0.05, log2FC>0.25):", nrow(sig_deg),
+      "across", dplyr::n_distinct(sig_deg$cluster), "clusters\n")
+}
+
 # ── QC plots ───────────────────────────────────────────────────────────────
 qc_vars <- c("nCount_Spatial", "nFeature_Spatial")
 
 qc_fp <- wrap_plots(
   lapply(qc_vars, function(v)
-    FeaturePlot(srt, features = v, reduction = "pearsonumap", order = TRUE) +
+    FeaturePlot(srt, features = v, reduction = "pearsonbatchumap", order = TRUE) +
       scale_color_gradient(low = "grey90", high = "darkblue") +
       ggtitle(v) +
       theme(plot.title = element_text(size = 10), legend.key.width = unit(0.3, "cm"))
@@ -153,10 +146,10 @@ qc_fp <- wrap_plots(
 ggsave(file.path(out_dir, "0a_FeaturePlot_QC.png"), qc_fp,
        width = 8, height = 3.5, dpi = 400)
 
-n_clusters <- nlevels(srt@meta.data$pearson_clusters)
+n_clusters <- nlevels(factor(srt@meta.data$pearson_clusters_batch))
 qc_vln <- wrap_plots(
   lapply(qc_vars, function(v)
-    VlnPlot(srt, features = v, group.by = "pearson_clusters", pt.size = 0) +
+    VlnPlot(srt, features = v, group.by = "pearson_clusters_batch", pt.size = 0) +
       ggtitle(v) +
       theme(plot.title = element_text(size = 10), axis.title.x = element_blank(),
             legend.position = "none")
@@ -181,77 +174,44 @@ make_fp <- function(reduction) {
 }
 
 ggsave(file.path(out_dir, "1a_FeaturePlot_genes.png"),
-       wrap_plots(make_fp("pearsonumap"), nrow = 1) +
-         plot_annotation(title = "Integrated tumour_anno — gene expression (no batch correction)"),
-       width = length(goi_present) * 3, height = 3, dpi = 400)
-
-ggsave(file.path(out_dir, "1b_FeaturePlot_genes_batch.png"),
        wrap_plots(make_fp("pearsonbatchumap"), nrow = 1) +
          plot_annotation(title = "Integrated tumour_anno — gene expression (batch corrected)"),
        width = length(goi_present) * 3, height = 3, dpi = 400)
 
-# ── Cluster DimPlots ───────────────────────────────────────────────────────
-dp <- DimPlot(srt, reduction = "pearsonumap",
-              group.by = "pearson_clusters", label = TRUE, label.size = 3) +
-  ggtitle("Integrated tumour_anno — clusters (no batch)") +
+# ── Cluster DimPlot ────────────────────────────────────────────────────────
+dp <- DimPlot(srt, reduction = "pearsonbatchumap",
+              group.by = "pearson_clusters_batch", label = TRUE, label.size = 3) +
+  ggtitle("Integrated tumour_anno — clusters (batch corrected)") +
   theme(legend.key.size = unit(0.4, "cm"))
 ggsave(file.path(out_dir, "2a_DimPlot_clusters.png"), dp,
        width = 6, height = 5, dpi = 400)
 
-dp_batch <- DimPlot(srt, reduction = "pearsonbatchumap",
-                    group.by = "pearson_clusters_batch", label = TRUE, label.size = 3) +
-  ggtitle("Integrated tumour_anno — clusters (batch corrected)") +
-  theme(legend.key.size = unit(0.4, "cm"))
-ggsave(file.path(out_dir, "2b_DimPlot_clusters_batch.png"), dp_batch,
+# ── Slide layout (batch-mixing check) ─────────────────────────────────────
+dp_s <- DimPlot(srt, reduction = "pearsonbatchumap", group.by = "slide", label = FALSE) +
+  ggtitle("Integrated tumour_anno — cells by slide (batch corrected)") +
+  theme(legend.key.size = unit(0.3, "cm"), plot.title = element_text(size = 9))
+ggsave(file.path(out_dir, "2c_slide_layout.png"), dp_s,
        width = 6, height = 5, dpi = 400)
 
-# ── Slide layout: UMAP (no batch) + UMAP (batch corrected) ────────────────
-dp_s <- DimPlot(srt, reduction = "pearsonumap", group.by = "slide", label = FALSE) +
-  ggtitle("UMAP (no batch)") +
-  theme(legend.key.size = unit(0.3, "cm"), plot.title = element_text(size = 9))
-
-dp_s_batch <- DimPlot(srt, reduction = "pearsonbatchumap", group.by = "slide",
-                      label = FALSE) +
-  ggtitle("UMAP (batch corrected)") +
-  theme(legend.key.size = unit(0.3, "cm"), plot.title = element_text(size = 9))
-
-ggsave(file.path(out_dir, "2c_slide_layout.png"),
-       (dp_s | dp_s_batch) + plot_annotation(title = "Integrated tumour_anno — cells by slide"),
-       width = 12, height = 5, dpi = 400)
-
-# ── Subclone layout: UMAP (no batch) + UMAP (batch corrected) ─────────────
+# ── Subclone layout ────────────────────────────────────────────────────────
 if ("subclone" %in% colnames(srt@meta.data)) {
   srt@meta.data$subclone <- factor(srt@meta.data$subclone)
-  dp_sc <- DimPlot(srt, reduction = "pearsonumap", group.by = "subclone",
+  dp_sc <- DimPlot(srt, reduction = "pearsonbatchumap", group.by = "subclone",
                    label = FALSE) +
-    ggtitle("UMAP (no batch)") +
+    ggtitle("Integrated tumour_anno — cells by subclone (batch corrected)") +
     theme(legend.key.size = unit(0.3, "cm"), plot.title = element_text(size = 9))
-
-  dp_sc_batch <- DimPlot(srt, reduction = "pearsonbatchumap",
-                         group.by = "subclone", label = FALSE) +
-    ggtitle("UMAP (batch corrected)") +
-    theme(legend.key.size = unit(0.3, "cm"), plot.title = element_text(size = 9))
-
-  ggsave(file.path(out_dir, "2e_subclone_layout.png"),
-         (dp_sc | dp_sc_batch) +
-           plot_annotation(title = "Integrated tumour_anno — cells by subclone"),
-         width = 12, height = 5, dpi = 400)
+  ggsave(file.path(out_dir, "2e_subclone_layout.png"), dp_sc,
+         width = 6, height = 5, dpi = 400)
 }
 
-# ── tumour_anno DimPlots ──────────────────────────────────────────────────
+# ── tumour_anno DimPlot ────────────────────────────────────────────────────
 if ("tumour_anno" %in% colnames(srt@meta.data)) {
-  dp_t <- DimPlot(srt, reduction = "pearsonumap", group.by = "tumour_anno",
+  dp_t <- DimPlot(srt, reduction = "pearsonbatchumap", group.by = "tumour_anno",
                   label = FALSE) +
-    ggtitle("tumour_anno (no batch)") +
+    ggtitle("Integrated — tumour_anno (batch corrected)") +
     theme(legend.key.size = unit(0.3, "cm"), plot.title = element_text(size = 9))
-  dp_t_batch <- DimPlot(srt, reduction = "pearsonbatchumap",
-                        group.by = "tumour_anno", label = FALSE) +
-    ggtitle("tumour_anno (batch corrected)") +
-    theme(legend.key.size = unit(0.3, "cm"), plot.title = element_text(size = 9))
-  ggsave(file.path(out_dir, "2d_tumour_anno.png"),
-         (dp_t | dp_t_batch) +
-           plot_annotation(title = "Integrated — tumour_anno"),
-         width = 12, height = 5, dpi = 400)
+  ggsave(file.path(out_dir, "2d_tumour_anno.png"), dp_t,
+         width = 6, height = 5, dpi = 400)
 }
 
 # ── Module score FeaturePlots ──────────────────────────────────────────────
@@ -266,16 +226,12 @@ make_mod_fp <- function(reduction) {
 }
 
 ggsave(file.path(out_dir, "3a_FeaturePlot_modules.png"),
-       wrap_plots(make_mod_fp("pearsonumap"), ncol = 3) +
-         plot_annotation(title = "Integrated tumour_anno — archetype scores (no batch)"),
-       width = 12, height = 6, dpi = 400)
-
-ggsave(file.path(out_dir, "3b_FeaturePlot_modules_batch.png"),
        wrap_plots(make_mod_fp("pearsonbatchumap"), ncol = 3) +
          plot_annotation(title = "Integrated tumour_anno — archetype scores (batch corrected)"),
        width = 12, height = 6, dpi = 400)
 
 # ── Correlation: gene expression vs module scores ──────────────────────────
+DefaultAssay(srt) <- "Spatial"
 expr_df <- as.data.frame(t(as.matrix(
   GetAssayData(srt, layer = "data")[goi_present, , drop = FALSE]
 )))
@@ -330,11 +286,6 @@ make_ucell_fp <- function(reduction) {
 }
 
 ggsave(file.path(out_dir, "5a_FeaturePlot_tumour_normal.png"),
-       wrap_plots(make_ucell_fp("pearsonumap"), nrow = 1) +
-         plot_annotation(title = "Integrated tumour_anno — tumour/normal scores (no batch)"),
-       width = length(ucell_cols) * 4, height = 3, dpi = 400)
-
-ggsave(file.path(out_dir, "5b_FeaturePlot_tumour_normal_batch.png"),
        wrap_plots(make_ucell_fp("pearsonbatchumap"), nrow = 1) +
          plot_annotation(title = "Integrated tumour_anno — tumour/normal scores (batch corrected)"),
        width = length(ucell_cols) * 4, height = 3, dpi = 400)
@@ -394,8 +345,7 @@ known_search_terms <- list(
 tme_search_terms <- setNames(
   lapply(names(tme_markers), function(nm)
     if (!is.null(known_search_terms[[nm]])) known_search_terms[[nm]] else default_search(nm)),
-  names(tme_markers)
-)
+  names(tme_markers))
 extract_c8_genes <- function(df, search_pattern) {
   df %>% filter(str_detect(gs_name, regex(search_pattern, ignore_case = TRUE))) %>%
     pull(gene_symbol) %>% unique()
@@ -408,7 +358,7 @@ if (!"celltype_annotation" %in% colnames(srt@meta.data)) {
     obj                 = srt,
     tme_markers         = tme_markers,
     secondary_genes     = c8_tme_markers,
-    cluster_col         = "pearson_clusters",
+    cluster_col         = "pearson_clusters_batch",
     assay               = "Spatial",
     data_slot           = "data",
     expr_min_val        = 0,
@@ -425,12 +375,12 @@ if (!"celltype_annotation" %in% colnames(srt@meta.data)) {
 
 ggsave(file.path(out_dir, "10a_celltype_annotation_DimPlot.png"),
        DimPlot(srt, group.by = "celltype_annotation",
-               cols = as.vector(pals::polychrome()), reduction = "pearsonumap") +
+               cols = as.vector(pals::polychrome()), reduction = "pearsonbatchumap") +
          ggtitle("TME cell-type annotation"),
        width = 7, height = 5, dpi = 350)
 
 ggsave(file.path(out_dir, "10b_celltype_annotation_QC.png"),
-       FeaturePlot(srt, "secondary_expr_frac", reduction = "pearsonumap") +
+       FeaturePlot(srt, "secondary_expr_frac", reduction = "pearsonbatchumap") +
          VlnPlot(srt, "nFeature_Spatial", group.by = "celltype_annotation",
                  pt.size = 0) + theme(legend.position = "none"),
        width = 12, height = 5, dpi = 350)

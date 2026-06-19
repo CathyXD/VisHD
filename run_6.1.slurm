@@ -3,9 +3,9 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=80G
-#SBATCH --time=3:00:00
+#SBATCH --time=1:00:00
 #SBATCH --job-name=archetype_tumour
-#SBATCH --array=1-8
+#SBATCH --array=1,3,6
 #SBATCH --output="slurmout/6.1.archetypal_analysis_tumour-%j-%a.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL

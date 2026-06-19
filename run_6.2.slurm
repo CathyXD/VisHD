@@ -2,8 +2,8 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=50G
-#SBATCH --time=1:00:00
+#SBATCH --mem=150G
+#SBATCH --time=3:00:00
 #SBATCH --job-name=archetype_downstream
 #SBATCH --output="slurmout/6.2.archetype_downstream-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org

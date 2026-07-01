@@ -346,40 +346,34 @@ if (length(gs23_cols) > 0)
 # ── B2. Pearson PCA UMAP ───────────────────────────────────────────────────────
 cat("Pearson PCA plots...\n")
 
-ggsave(file.path(pearson_dir, "1_DimPlot_cell_type.png"),
-       DimPlot(srt, reduction = "pearsonumap", group.by = "cell_type",
-               cols = ct_pal, raster = FALSE) +
-         ggtitle(paste(i, "— cell type")),
-       width = 9, height = 7, dpi = 150)
+pp_ct   <- DimPlot(srt, reduction = "pearsonumap", group.by = "cell_type",
+                   cols = ct_pal, raster = FALSE) +
+             ggtitle(paste(i, "— cell type"))
+pp_comp <- DimPlot(srt, reduction = "pearsonumap", group.by = "compartment",
+                   raster = FALSE) +
+             ggtitle(paste(i, "— compartment"))
+pp_cl   <- DimPlot(srt, reduction = "pearsonumap", group.by = "pearson_clusters",
+                   label = TRUE, label.size = 3, repel = TRUE,
+                   cols = as.vector(polychrome()), raster = FALSE) +
+             ggtitle(sprintf("%s — Pearson clusters (n=%d)", i,
+                             nlevels(factor(srt$pearson_clusters)))) +
+             theme(legend.position = "none")
+pp_mg   <- DimPlot(srt, reduction = "pearsonumap", group.by = "module_anno",
+                   cols = mg_pal, raster = FALSE) +
+             ggtitle(paste(i, "— module group")) +
+             theme(legend.text = element_text(size = 7))
+pp_fa   <- DimPlot(srt, reduction = "pearsonumap", group.by = "final_annotation",
+                   cols = final_anno_pal, raster = FALSE) +
+             ggtitle(paste(i, "— final annotation")) +
+             theme(legend.text = element_text(size = 7))
+pp_sub  <- DimPlot(srt, reduction = "pearsonumap", group.by = "subclone",
+                   label = TRUE, label.size = 3, repel = TRUE,
+                   cols = as.vector(polychrome()), raster = FALSE) +
+             ggtitle(paste(i, "— subclone"))
 
-ggsave(file.path(pearson_dir, "2_DimPlot_compartment.png"),
-       DimPlot(srt, reduction = "pearsonumap", group.by = "compartment",
-               raster = FALSE) +
-         ggtitle(paste(i, "— compartment")),
-       width = 8, height = 7, dpi = 150)
-
-ggsave(file.path(pearson_dir, "3_DimPlot_clusters.png"),
-       DimPlot(srt, reduction = "pearsonumap", group.by = "pearson_clusters",
-               label = TRUE, label.size = 3, repel = TRUE,
-               cols = as.vector(polychrome()), raster = FALSE) +
-         ggtitle(sprintf("%s — Pearson clusters (n=%d)", i,
-                         nlevels(factor(srt$pearson_clusters)))) +
-         theme(legend.position = "none"),
-       width = 8, height = 7, dpi = 150)
-
-ggsave(file.path(pearson_dir, "4_DimPlot_module_anno.png"),
-       DimPlot(srt, reduction = "pearsonumap", group.by = "module_anno",
-               cols = mg_pal, raster = FALSE) +
-         ggtitle(paste(i, "— module group")) +
-         theme(legend.text = element_text(size = 7)),
-       width = 9, height = 7, dpi = 150)
-
-ggsave(file.path(pearson_dir, "5_DimPlot_final_annotation.png"),
-       DimPlot(srt, reduction = "pearsonumap", group.by = "final_annotation",
-               cols = final_anno_pal, raster = FALSE) +
-         ggtitle(paste(i, "— final annotation")) +
-         theme(legend.text = element_text(size = 7)),
-       width = 10, height = 7, dpi = 150)
+ggsave(file.path(pearson_dir, "1_DimPlot_combined.png"),
+       (pp_ct | pp_comp | pp_cl) / (pp_mg | pp_fa | pp_sub),
+       width = 27, height = 14, dpi = 150)
 
 ggsave(file.path(pearson_dir, "6_FeaturePlot_tumour_markers.png"),
        FeaturePlot(srt, reduction = "pearsonumap", features = tumour_markers,
@@ -401,34 +395,31 @@ srt <- score_meta_programs(srt, meta_programs, out_dir = pearson_dir,
 # ── B3. BANKSY UMAP ────────────────────────────────────────────────────────────
 cat("BANKSY plots...\n")
 
-ggsave(file.path(banksy_dir, "1_DimPlot_banksy_clusters.png"),
-       DimPlot(srt, reduction = "banksy0.2.umap", group.by = "banksy_clusters",
-               label = TRUE, label.size = 3, repel = TRUE,
-               cols = as.vector(polychrome()), raster = FALSE) +
-         ggtitle(sprintf("%s — BANKSY clusters (n=%d)", i,
-                         nlevels(factor(srt$banksy_clusters)))) +
-         theme(legend.position = "none"),
-       width = 8, height = 7, dpi = 150)
+pb_cl   <- DimPlot(srt, reduction = "banksy0.2.umap", group.by = "banksy_clusters",
+                   label = TRUE, label.size = 3, repel = TRUE,
+                   cols = as.vector(polychrome()), raster = FALSE) +
+             ggtitle(sprintf("%s — BANKSY clusters (n=%d)", i,
+                             nlevels(factor(srt$banksy_clusters)))) +
+             theme(legend.position = "none")
+pb_ct   <- DimPlot(srt, reduction = "banksy0.2.umap", group.by = "cell_type",
+                   cols = ct_pal, raster = FALSE) +
+             ggtitle(paste(i, "— cell type"))
+pb_mg   <- DimPlot(srt, reduction = "banksy0.2.umap", group.by = "module_anno",
+                   cols = mg_pal, raster = FALSE) +
+             ggtitle(paste(i, "— module group")) +
+             theme(legend.text = element_text(size = 7))
+pb_fa   <- DimPlot(srt, reduction = "banksy0.2.umap", group.by = "final_annotation",
+                   cols = final_anno_pal, raster = FALSE) +
+             ggtitle(paste(i, "— final annotation")) +
+             theme(legend.text = element_text(size = 7))
+pb_sub  <- DimPlot(srt, reduction = "banksy0.2.umap", group.by = "subclone",
+                   label = TRUE, label.size = 3, repel = TRUE,
+                   cols = as.vector(polychrome()), raster = FALSE) +
+             ggtitle(paste(i, "— subclone"))
 
-ggsave(file.path(banksy_dir, "2_DimPlot_cell_type.png"),
-       DimPlot(srt, reduction = "banksy0.2.umap", group.by = "cell_type",
-               cols = ct_pal, raster = FALSE) +
-         ggtitle(paste(i, "— cell type")),
-       width = 9, height = 7, dpi = 150)
-
-ggsave(file.path(banksy_dir, "3_DimPlot_module_anno.png"),
-       DimPlot(srt, reduction = "banksy0.2.umap", group.by = "module_anno",
-               cols = mg_pal, raster = FALSE) +
-         ggtitle(paste(i, "— module group")) +
-         theme(legend.text = element_text(size = 7)),
-       width = 9, height = 7, dpi = 150)
-
-ggsave(file.path(banksy_dir, "4_DimPlot_final_annotation.png"),
-       DimPlot(srt, reduction = "banksy0.2.umap", group.by = "final_annotation",
-               cols = final_anno_pal, raster = FALSE) +
-         ggtitle(paste(i, "— final annotation")) +
-         theme(legend.text = element_text(size = 7)),
-       width = 10, height = 7, dpi = 150)
+ggsave(file.path(banksy_dir, "1_DimPlot_combined.png"),
+       (pb_cl | pb_ct | pb_sub) / (pb_mg | pb_fa | plot_spacer()),
+       width = 27, height = 14, dpi = 150)
 
 ggsave(file.path(banksy_dir, "5_FeaturePlot_tumour_markers.png"),
        FeaturePlot(srt, reduction = "banksy0.2.umap", features = tumour_markers,

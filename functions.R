@@ -938,12 +938,14 @@ score_meta_programs <- function(obj, meta_programs, meta_cols, out_dir,
     ncol_g <- min(3L, length(sheet_cols))
     nrow_g <- ceiling(length(sheet_cols) / ncol_g)
     base   <- make.names(sheet)
-    mid    <- mean(sapply(sheet_cols, function(f) {
-      v <- obj@meta.data[[f]]; (max(v, na.rm=TRUE) + min(v, na.rm=TRUE)) / 2
-    }))
-    grad2  <- scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred",
-                                    midpoint = mid)
-    g <- FeaturePlot(obj, sheet_cols, ncol = ncol_g, reduction = reductions) & grad2
+    plots_s <- lapply(sheet_cols, function(f) {
+      v   <- obj@meta.data[[f]]
+      mid <- (max(v, na.rm = TRUE) + min(v, na.rm = TRUE)) / 2
+      FeaturePlot(obj, features = f, reduction = reductions) +
+        scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred",
+                              midpoint = mid)
+    })
+    g <- patchwork::wrap_plots(plots_s, ncol = ncol_g)
     ggsave(file.path(out_dir, paste0("meta_", base, tag, reductions, ".png")),
            plot = g, width = ncol_g * 4, height = nrow_g * 3.5,
            dpi = 200, limitsize = FALSE)

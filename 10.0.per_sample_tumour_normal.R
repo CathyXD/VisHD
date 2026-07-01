@@ -262,13 +262,15 @@ fp_save <- function(srt, feats, red, outfile, ncol = 3, dpi = 400) {
   feats <- feats[feats %in% colnames(srt@meta.data)]
   if (length(feats) == 0) return(invisible(NULL))
   nrows <- ceiling(length(feats) / ncol)
-  mid   <- mean(sapply(feats, function(f) {
-    v <- srt@meta.data[[f]]; (max(v, na.rm=TRUE) + min(v, na.rm=TRUE)) / 2
-  }))
-  grad2 <- scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
-                                   midpoint = mid)
-  p <- FeaturePlot(srt, reduction = red, features = feats, ncol = ncol, order = TRUE)
-  ggsave(outfile, p & grad2,
+  plots <- lapply(feats, function(f) {
+    v   <- srt@meta.data[[f]]
+    mid <- (max(v, na.rm = TRUE) + min(v, na.rm = TRUE)) / 2
+    FeaturePlot(srt, reduction = red, features = f, order = TRUE) +
+      scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
+                             midpoint = mid)
+  })
+  p <- patchwork::wrap_plots(plots, ncol = ncol)
+  ggsave(outfile, p,
          width = ncol * 4, height = nrows * 3.5,
          dpi = dpi, limitsize = FALSE)
 }

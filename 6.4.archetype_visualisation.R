@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # 6.4.archetype_visualisation.R
 # Visualise the integrated-tumour archetypal analysis results produced by
-# 6.3.integrate_tumour_archetype.ipynb (partipy, n = 5 archetypes) against the
+# 6.3.integrate_tumour_archetype.ipynb (partipy, n = 4 archetypes) against the
 # actual Seurat object, in the visual style of 6.2archetype_downstream.R.
 #
 # Renders three result families:
@@ -31,7 +31,7 @@ srt_path <- file.path(base_dir, "4.5.integrate_tumour_anno", "integrated_pearson
 outdir   <- file.path(res_dir, "viz")
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
-archetypes <- paste0("Archetype_", 0:4)
+archetypes <- paste0("Archetype_", 0:3)
 top_n_de   <- 15
 
 arch_cols  <- setNames(brewer.pal(length(archetypes), "Set1"), archetypes)
@@ -40,7 +40,7 @@ arch_cols  <- setNames(brewer.pal(length(archetypes), "Set1"), archetypes)
 message("Loading Seurat object ...")
 srt <- qs_read(srt_path)
 
-w <- read.csv(file.path(res_dir, "AA_cell_weights_n5.csv"),
+w <- read.csv(file.path(res_dir, "AA_cell_weights_n4.csv"),
               row.names = 1, check.names = FALSE)
 
 cells <- intersect(colnames(srt), rownames(w))
@@ -51,7 +51,7 @@ if (length(cells) < 0.99 * ncol(srt))
 srt <- subset(srt, cells = cells)
 w   <- w[cells, archetypes, drop = FALSE]
 
-# AA_cell_weights_n5.csv is column-normalised; row-normalise to per-cell membership
+# AA_cell_weights_n4.csv is column-normalised; row-normalise to per-cell membership
 w_norm <- as.data.frame(w / rowSums(w))
 
 srt <- AddMetaData(srt, w_norm)

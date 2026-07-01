@@ -54,9 +54,14 @@ if (file.exists(pearson_path)) {
     counts   <- GetAssayData(srt_full, assay = "Spatial", layer = "counts")
     meta     <- srt_full@meta.data
     meta$slide <- slides[i]
+    # GetTissueCoordinates rows are ordered as colnames() with integer rownames
+    # (1:n); the real barcode is in coords$cell. Map by cell id — indexing by
+    # rownames(meta) (barcodes) silently mismatches/yields NA.
     coords   <- GetTissueCoordinates(srt_full, which = "centroids")
-    meta$x_centroid <- coords[rownames(meta), "x"]
-    meta$y_centroid <- coords[rownames(meta), "y"]
+    idx <- match(rownames(meta), coords$cell)
+    stopifnot(!anyNA(idx))
+    meta$x_centroid <- coords$x[idx]
+    meta$y_centroid <- coords$y[idx]
     srt_mini <- CreateSeuratObject(counts = counts, meta.data = meta, assay = "Spatial")
     rm(srt_full); gc()
     srt_mini

@@ -1,0 +1,13 @@
+library(qs2); library(Seurat)
+srt <- qs_read(path.expand("~/VisHD/10.0.tumour_normal_integration/integrated_pearson_srt.qs2"))
+m <- srt@meta.data
+cat("total cells:", nrow(m), "\n")
+m$na_coord <- is.na(m$x_centroid) | is.na(m$y_centroid)
+cat("\nNA-coord by final_annotation (FALSE=has coord, TRUE=missing):\n")
+print(table(final_annotation = m$final_annotation, na_coord = m$na_coord))
+cat("\nNA-coord by is_tumour:\n")
+print(table(is_tumour = m$final_annotation == "Tumour", na_coord = m$na_coord))
+cat("\nNA-coord by slide:\n")
+print(tapply(m$na_coord, m$slide, sum))
+cat("\nx_centroid summary:\n"); print(summary(m$x_centroid))
+cat("non-finite x:", sum(!is.finite(m$x_centroid)), " y:", sum(!is.finite(m$y_centroid)), "\n")

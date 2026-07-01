@@ -55,6 +55,8 @@ group_plots  <- list()   # ImageDimPlot of archetype_group, one per sample
 weight_plots <- list()   # weight_plots[[archetype_idx]][[sample]] — cell-weight maps
 score_plots  <- list()   # score_plots[[archetype_idx]][[sample]]  — DEG module scores
 meta_list    <- list()   # per-sample archetype meta.data for export
+markers_list <- list()   # per-sample FindAllMarkers(MAST) between archetype_group
+pop_expr_list <- list()  # per-sample per-archetype mean SpaNorm expression (genes)
 
 for (i in seq_along(samples)) {
   s          <- samples[i]
@@ -126,6 +128,16 @@ for (i in seq_along(samples)) {
   DefaultAssay(srt) <- score_assay
   if (score_assay == "Spatial") srt <- NormalizeData(srt, verbose = FALSE)
 
+  # Per-archetype-population mean expression from the SpaNorm normalized values
+  # (cells averaged within each archetype_group). Captured here because srt is
+  # freed at the end of the loop; subset to the exclusive markers downstream.
+  pop_data <- GetAssayData(srt, assay = score_assay, layer = "data")
+  pop_grp  <- droplevels(srt$archetype_group)
+  pop_means <- t(sapply(levels(pop_grp), function(g)
+    Matrix::rowMeans(pop_data[, pop_grp == g, drop = FALSE])))
+  rownames(pop_means) <- paste0(s, "_A", as.integer(sub("Archetype_", "", levels(pop_grp))))
+  pop_expr_list[[s]] <- pop_means
+
   score_cols <- character(0)
   for (i in 0:(K - 1)) {
     de    <- read.csv(file.path(result_dir, sprintf("DE_Archetype_%d_vs_rest.csv", i)),
@@ -138,6 +150,21 @@ for (i in seq_along(samples)) {
     names(srt@meta.data)[names(srt@meta.data) == sprintf("archDEG_%d1", i)] <-
       sprintf("archDEG_%d", i)
     score_cols <- c(score_cols, sprintf("archDEG_%d", i))
+  }
+
+  # ── Per-sample DE between archetype groups (FindAllMarkers, MAST) ───────────
+  # archetype_group levels are per-sample; relabel cluster → {sample}_A{idx} so
+  # markers align with arch_expr_all rownames for the downstream correlation.
+  Idents(srt) <- "archetype_group"
+  if (nlevels(droplevels(srt$archetype_group)) >= 2) {
+    mk <- FindAllMarkers(srt, assay = score_assay, test.use = "MAST",
+                         only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.25,
+                         verbose = FALSE)
+    if (nrow(mk) > 0) {
+      mk$archetype <- paste0(s, "_A", as.integer(sub("Archetype_", "", mk$cluster)))
+      mk$slide     <- s
+      markers_list[[s]] <- mk
+    }
   }
 
   # Per-sample spatial plots (FOV-based Visium HD → Image* family)
@@ -496,6 +523,82 @@ if (length(meta_list) > 0) {
   for (s in names(meta_list))
     write.csv(meta_list[[s]],
               file.path(outdir, sprintf("archetype_cell_metadata_%s.csv", s)), row.names = FALSE)
+}
+
+# ── 13. Differential expression between archetype groups (MAST) ───────────────
+if (length(markers_list) > 0) {
+  markers_all <- dplyr::bind_rows(markers_list)
+  write.csv(markers_all,
+            file.path(outdir, "archetype_group_DE_MAST_all_samples.csv"), row.names = FALSE)
+  saveRDS(markers_list, file.path(outdir, "archetype_group_DE_MAST.Rds"))
+
+  # ── 14. Exclusive markers ───────────────────────────────────────────────────
+  # Keep genes that are significant, strongly up, and specific (high pct.1 vs
+  # pct.2), then within each sample retain only genes flagged for a single
+  # archetype group → "highly exclusively expressing in the archetype group".
+  excl_lfc       <- 0     # min avg_log2FC
+  excl_delta_pct <- 0  # min (pct.1 - pct.2)
+  sig <- markers_all %>%
+    filter(p_val_adj < 0.05, avg_log2FC >= excl_lfc, (pct.1 - pct.2) >= excl_delta_pct)
+  excl <- sig %>%
+    group_by(slide, gene) %>% filter(n() == 1) %>% ungroup()
+  write.csv(excl,
+            file.path(outdir, "archetype_group_exclusive_markers.csv"), row.names = FALSE)
+
+  # Independent SpaNorm-based feature set: assemble the per-archetype-population
+  # mean expression captured in the loop into one archetype × gene matrix over
+  # the UNION of genes across samples (NA where a gene is absent from a sample),
+  # then subset to the exclusive MAST markers — entirely decoupled from
+  # arch_expr_all / the common-gene intersection.
+  pop_genes_union <- Reduce(union, lapply(pop_expr_list, colnames))
+  pop_expr_union  <- do.call(rbind, lapply(unname(pop_expr_list), function(m) {
+    full <- matrix(NA_real_, nrow = nrow(m), ncol = length(pop_genes_union),
+                   dimnames = list(rownames(m), pop_genes_union))
+    full[, colnames(m)] <- m
+    full
+  }))
+
+  excl_genes <- intersect(unique(excl$gene), colnames(pop_expr_union))
+  excl_genes <- excl_genes[!grepl("^MT-", excl_genes)]
+  message(length(excl_genes), " exclusive marker genes for archetype-group correlation")
+
+  # ── 15. Correlation heatmap on exclusive-marker expression ──────────────────
+  if (length(excl_genes) >= 3) {
+    cor_excl <- cor(t(as.matrix(pop_expr_union[, excl_genes])), method = "spearman")
+    write.csv(cor_excl, file.path(outdir, "archetype_cor_exclusive_markers.csv"))
+
+    # Annotation derived from each population label ({sample}_A{idx}) so it
+    # stays aligned even if a sample contributes fewer archetype groups here
+    # than rows in arch_expr_all.
+    excl_annot <- sub("_A[0-9]+$", "", rownames(cor_excl))
+    row_ha_e <- rowAnnotation(Sample = excl_annot,
+                              col = list(Sample = sample_colors),
+                              show_annotation_name = FALSE)
+    col_ha_e <- HeatmapAnnotation(Sample = excl_annot,
+                                  col = list(Sample = sample_colors),
+                                  show_annotation_name = FALSE)
+
+    png(file.path(outdir, "9_archetype_cor_exclusive_markers.png"),
+        width = 1400, height = 1200, res = 150)
+    draw(Heatmap(
+      cor_excl,
+      name                      = "Spearman r",
+      col                       = col_cor,
+      left_annotation           = row_ha_e,
+      top_annotation            = col_ha_e,
+      show_row_names            = TRUE,
+      show_column_names         = TRUE,
+      row_names_gp              = gpar(fontsize = 7),
+      column_names_gp           = gpar(fontsize = 7),
+      column_title              = "Archetype–archetype correlation (exclusive MAST markers)",
+      clustering_method_rows    = "ward.D2",
+      clustering_method_columns = "ward.D2"
+    ))
+    dev.off()
+  } else {
+    message("Too few exclusive marker genes (", length(excl_genes),
+            ") — skipping exclusive-marker correlation heatmap")
+  }
 }
 
 message("\nDone. Results saved to ", outdir)

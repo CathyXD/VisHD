@@ -175,7 +175,7 @@ ucell_score <- function(srt, feats, prefix) {
   feats <- feats[lengths(feats) > 0]
   if (length(feats) == 0) return(list(srt = srt, cols = character(0)))
   srt      <- AddModuleScore_UCell(srt, features = feats, name = prefix)
-  raw_cols <- paste0(prefix, names(feats))   # UCell names: <prefix><signame>
+  raw_cols <- paste0(names(feats), prefix)   # UCell names: <signame><prefix>
   new_cols <- paste0(prefix, names(feats), "_UCell")
   for (k in seq_along(raw_cols)) {
     pos <- match(raw_cols[k], colnames(srt@meta.data))

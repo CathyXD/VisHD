@@ -389,7 +389,8 @@ if (length(gs23_cols) > 0)
           file.path(pearson_dir, "10_FeaturePlot_genesets2023.png"), ncol = 4)
 
 # Gavish meta-program FeaturePlots across all three reductions (saves to pearson_dir)
-srt <- score_meta_programs(srt, meta_programs, out_dir = pearson_dir,
+srt <- score_meta_programs(srt, meta_programs, meta_cols = meta_cols,
+                            out_dir = pearson_dir,
                             reductions = c("umap", "pearsonumap", "banksy0.2.umap"))
 
 # ── B3. BANKSY UMAP ────────────────────────────────────────────────────────────

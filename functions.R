@@ -917,31 +917,30 @@ filter_artefacts_knn <- function(srt,
 }
 
 
-# Score every program in `meta_programs` (a nested list: sheet → program → genes)
-# onto `obj` and save one FeaturePlot PNG per sheet for each available reduction.
-score_meta_programs <- function(obj, meta_programs, out_dir,
-                                reductions = c("umap", "pearsonumap"),
+# Plot pre-computed UCell meta-program scores (one PNG per sheet per reduction).
+# Scores must already be in obj@meta.data, computed via:
+#   res <- ucell_score(obj, meta_programs_unlist, "_meta"); meta_cols <- res$cols
+# meta_programs is the original nested list (sheet → program → genes) used only
+# to group columns by sheet; meta_cols is the vector of column names to plot.
+score_meta_programs <- function(obj, meta_programs, meta_cols, out_dir,
+                                reductions = "umap",
                                 tag = "") {
   require(Seurat)
   require(ggplot2)
   for (sheet in names(meta_programs)) {
-    progs <- Filter(function(g) length(intersect(g, rownames(obj))) >= 3,
-                    meta_programs[[sheet]])
-    if (length(progs) == 0) next
+    # Columns for this sheet: ucell_score named them _meta<SheetName>.<ProgramName>_UCell
+    sheet_pat  <- paste0("^_meta", make.names(sheet), "\\.")
+    sheet_cols <- grep(sheet_pat, meta_cols, value = TRUE)
+    sheet_cols <- sheet_cols[sheet_cols %in% colnames(obj@meta.data)]
+    if (length(sheet_cols) == 0) next
 
-    pref <- paste0(".meta.", make.names(sheet), ".")
-    obj  <- AddModuleScore(obj, features = progs, name = pref)
-    raw  <- paste0(pref, seq_along(progs))
-    cols <- paste0(sheet, "_", names(progs))
-    colnames(obj@meta.data)[match(raw, colnames(obj@meta.data))] <- cols
-
-    ncol_g <- min(3, length(cols))
-    nrow_g <- ceiling(length(cols) / ncol_g)
+    ncol_g <- min(3L, length(sheet_cols))
+    nrow_g <- ceiling(length(sheet_cols) / ncol_g)
     base   <- make.names(sheet)
 
     for (red in intersect(reductions, Reductions(obj))) {
       red_suffix <- if (red == "umap") "" else paste0("_", red)
-      g <- FeaturePlot(obj, cols, ncol = ncol_g, reduction = red) &
+      g <- FeaturePlot(obj, sheet_cols, ncol = ncol_g, reduction = red) &
         scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred")
       ggsave(file.path(out_dir, paste0("meta_", base, tag, red_suffix, ".png")),
              plot = g, width = ncol_g * 4, height = nrow_g * 3.5,

@@ -938,7 +938,9 @@ score_meta_programs <- function(obj, meta_programs, meta_cols, out_dir,
     ncol_g <- min(3L, length(sheet_cols))
     nrow_g <- ceiling(length(sheet_cols) / ncol_g)
     base   <- make.names(sheet)
-    mid    <- median(unlist(obj@meta.data[, sheet_cols, drop = FALSE]), na.rm = TRUE)
+    mid    <- mean(sapply(sheet_cols, function(f) {
+      v <- obj@meta.data[[f]]; (max(v, na.rm=TRUE) + min(v, na.rm=TRUE)) / 2
+    }))
     grad2  <- scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred",
                                     midpoint = mid)
     g <- FeaturePlot(obj, sheet_cols, ncol = ncol_g, reduction = reductions) & grad2

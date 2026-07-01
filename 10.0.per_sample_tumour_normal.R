@@ -262,7 +262,9 @@ fp_save <- function(srt, feats, red, outfile, ncol = 3, dpi = 400) {
   feats <- feats[feats %in% colnames(srt@meta.data)]
   if (length(feats) == 0) return(invisible(NULL))
   nrows <- ceiling(length(feats) / ncol)
-  mid   <- median(unlist(srt@meta.data[, feats, drop = FALSE]), na.rm = TRUE)
+  mid   <- mean(sapply(feats, function(f) {
+    v <- srt@meta.data[[f]]; (max(v, na.rm=TRUE) + min(v, na.rm=TRUE)) / 2
+  }))
   grad2 <- scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
                                    midpoint = mid)
   p <- FeaturePlot(srt, reduction = red, features = feats, ncol = ncol, order = TRUE)

@@ -95,10 +95,10 @@ canon <- function(x) vapply(strsplit(x, "/"),
 if (file.exists("tumour_normal_anno_srt.qs2")) {
   cat("Found existing tumour_normal_anno_srt.qs2 — loading directly\n")
   srt            <- qs_read("tumour_normal_anno_srt.qs2")
-  arch_mod_cols  <- grep("^arch_.*_UCell$",  colnames(srt@meta.data), value = TRUE)
-  mod_score_cols <- grep("^gd_.*_UCell$",    colnames(srt@meta.data), value = TRUE)
-  gs23_cols      <- grep("^gs23_.*_UCell$",  colnames(srt@meta.data), value = TRUE)
-  tn_cols        <- grep("^tn_.*_UCell$",    colnames(srt@meta.data), value = TRUE)
+  # arch_mod_cols  <- grep("^arch_.*_UCell$",  colnames(srt@meta.data), value = TRUE)
+  # mod_score_cols <- grep("^gd_.*_UCell$",    colnames(srt@meta.data), value = TRUE)
+  # gs23_cols      <- grep("^gs23_.*_UCell$",  colnames(srt@meta.data), value = TRUE)
+  # tn_cols        <- grep("^tn_.*_UCell$",    colnames(srt@meta.data), value = TRUE)
   DEG            <- readRDS("tumour_normal_deg_spanorm.Rds")
   present        <- levels(droplevels(factor(srt$module_anno)))
   mg_pal         <- setNames(group_pal[canon(present)], present)
@@ -150,15 +150,15 @@ srt$banksy_clusters <- srt$seurat_clusters
 Idents(srt) <- "banksy_clusters"
 qs_save(srt, "tumour_normal_anno_srt.qs2")
 cat("BANKSY done\n")
-
+} # end if/else (cache check)
 # ── A4. Clean meta.data (remove all stale score columns before scoring) ────────
 {
   drop_score <- grep(
-    "_UCell$|Module[0-9]*$|^ct_[0-9]+$|^GDmod_|^module_G|^gs23_|^arch_|^gd_|^tn_",
+    "_UCell$|Module[0-9]*$|^ct_[0-9]+$|^GDmod_|^module_G|^gs23_|^arch_|^gd_|^tn_|ct_$|arch_$|gd_$|gs23_$|tn_$",
     colnames(srt@meta.data), value = TRUE
   )
   all_gset_names <- unique(c(names(clean_module), names(all_marker),
-                              names(genesets2023), names(groupdeg)))
+                              names(genesets2023), names(groupdeg), names(meta_programs)))
   drop_overlap <- intersect(all_gset_names, colnames(srt@meta.data))
   to_drop <- unique(c(drop_score, drop_overlap))
   if (length(to_drop) > 0) {
@@ -175,7 +175,7 @@ ucell_score <- function(srt, feats, prefix) {
   feats <- feats[lengths(feats) > 0]
   if (length(feats) == 0) return(list(srt = srt, cols = character(0)))
   srt      <- AddModuleScore_UCell(srt, features = feats, name = prefix)
-  raw_cols <- paste0(names(feats), prefix)   # UCell names: <signame><prefix>
+  raw_cols <- paste0(prefix, names(feats))   # UCell names: <prefix><signame>
   new_cols <- paste0(prefix, names(feats), "_UCell")
   for (k in seq_along(raw_cols)) {
     pos <- match(raw_cols[k], colnames(srt@meta.data))
@@ -184,8 +184,7 @@ ucell_score <- function(srt, feats, prefix) {
   list(srt = srt, cols = new_cols)
 }
 
-DefaultAssay(srt) <- "Spatial"
-srt <- NormalizeData(srt, verbose = FALSE)
+DefaultAssay(srt) <- "SpaNorm"
 
 # 1. Archetype modules (clean_module) → arch_AR_UCell, arch_Inflammation_UCell, ...
 res <- ucell_score(srt, clean_module, "arch_")
@@ -254,7 +253,7 @@ run_gsea_panel(DEG, gene_sets, "tumour_normal_deg_enrich.Rds")
 qs_save(srt, "tumour_normal_anno_srt.qs2")
 cat("==================== ", i, " processing done ====================\n")
 
-} # end if/else (cache check)
+
 
 # ════════════════════════════════════════════════════════════════════════════════
 # SECTION B: VISUALIZATION

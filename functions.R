@@ -927,6 +927,7 @@ score_meta_programs <- function(obj, meta_programs, meta_cols, out_dir,
                                 tag = "") {
   require(Seurat)
   require(ggplot2)
+
   for (sheet in names(meta_programs)) {
     # Columns for this sheet: ucell_score named them _meta<SheetName>.<ProgramName>_UCell
     sheet_pat  <- paste0("^_meta", make.names(sheet), "\\.")
@@ -937,17 +938,14 @@ score_meta_programs <- function(obj, meta_programs, meta_cols, out_dir,
     ncol_g <- min(3L, length(sheet_cols))
     nrow_g <- ceiling(length(sheet_cols) / ncol_g)
     base   <- make.names(sheet)
-
-    for (red in intersect(reductions, Reductions(obj))) {
-      red_suffix <- if (red == "umap") "" else paste0("_", red)
-      g <- FeaturePlot(obj, sheet_cols, ncol = ncol_g, reduction = red) &
-        scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred")
-      ggsave(file.path(out_dir, paste0("meta_", base, tag, red_suffix, ".png")),
-             plot = g, width = ncol_g * 4, height = nrow_g * 3.5,
-             dpi = 200, limitsize = FALSE)
-    }
+    mid    <- median(unlist(obj@meta.data[, sheet_cols, drop = FALSE]), na.rm = TRUE)
+    grad2  <- scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred",
+                                    midpoint = mid)
+    g <- FeaturePlot(obj, sheet_cols, ncol = ncol_g, reduction = reductions) & grad2
+    ggsave(file.path(out_dir, paste0("meta_", base, tag, reductions, ".png")),
+           plot = g, width = ncol_g * 4, height = nrow_g * 3.5,
+           dpi = 200, limitsize = FALSE)
   }
-  obj
 }
 
 

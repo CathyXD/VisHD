@@ -43,13 +43,16 @@ clean_module <- readRDS("~/VisHD/public_signature/clean_module.Rds")
 names(clean_module) <- c("AR", "Inflammation", "NE1", "NE2", "Cycling", "Glycolysis")
 
 genesets2023 <- readRDS("~/VisHD/public_signature/genesets2023.Rds")
-genesets2023 <- lapply(genesets2023, as.character)
+genesets2023 <- unlist(genesets2023, recursive = FALSE)
+
 
 meta_xlsx     <- "~/VisHD/public_signature/meta_programs_2025-01-29.xlsx"
 sheetname     <- excel_sheets(meta_xlsx)
 meta_programs <- set_names(sheetname, sheetname) %>%
   map(~ read_excel(meta_xlsx, sheet = .x, col_names = TRUE)) %>%
   map(~ map(.x, ~ as.character(na.omit(.x))))
+meta_programs_unlist <- unlist(meta_programs, recursive = F)
+names(meta_programs_unlist) <- make.names(names(meta_programs_unlist), unique = T)
 
 metas    <- readRDS("~/VisHD/6.2.3.signature_analysis/binarisation/metas.Rds")
 groupdeg <- readRDS(paste0("~/VisHD/6.2archetype_downstream_tumour/archetype_module/",
@@ -95,14 +98,7 @@ canon <- function(x) vapply(strsplit(x, "/"),
 if (file.exists("tumour_normal_anno_srt.qs2")) {
   cat("Found existing tumour_normal_anno_srt.qs2 — loading directly\n")
   srt            <- qs_read("tumour_normal_anno_srt.qs2")
-  # arch_mod_cols  <- grep("^arch_.*_UCell$",  colnames(srt@meta.data), value = TRUE)
-  # mod_score_cols <- grep("^gd_.*_UCell$",    colnames(srt@meta.data), value = TRUE)
-  # gs23_cols      <- grep("^gs23_.*_UCell$",  colnames(srt@meta.data), value = TRUE)
-  # tn_cols        <- grep("^tn_.*_UCell$",    colnames(srt@meta.data), value = TRUE)
   DEG            <- readRDS("tumour_normal_deg_spanorm.Rds")
-  present        <- levels(droplevels(factor(srt$module_anno)))
-  mg_pal         <- setNames(group_pal[canon(present)], present)
-  mg_pal["Normal"] <- "lightpink"
 } else {
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -150,6 +146,12 @@ srt$banksy_clusters <- srt$seurat_clusters
 Idents(srt) <- "banksy_clusters"
 qs_save(srt, "tumour_normal_anno_srt.qs2")
 cat("BANKSY done\n")
+# ── A8. DEG + enrichment (on banksy_clusters) ─────────────────────────────────
+DefaultAssay(srt) <- "SpaNorm"
+Idents(srt) <- "banksy_clusters"
+DEG <- FindAllMarkers(srt, test.use = "MAST", only.pos = TRUE)
+saveRDS(DEG, "tumour_normal_deg_spanorm.Rds")
+run_gsea_panel(DEG, gene_sets, "tumour_normal_deg_enrich.Rds")
 } # end if/else (cache check)
 # ── A4. Clean meta.data (remove all stale score columns before scoring) ────────
 {
@@ -174,28 +176,23 @@ ucell_score <- function(srt, feats, prefix) {
   feats <- lapply(feats, function(g) intersect(as.character(g), rownames(srt)))
   feats <- feats[lengths(feats) > 0]
   if (length(feats) == 0) return(list(srt = srt, cols = character(0)))
-  srt      <- AddModuleScore_UCell(srt, features = feats, name = prefix)
-  raw_cols <- paste0(names(feats), prefix)   # UCell names: <signame><prefix>
-  new_cols <- paste0(prefix, names(feats), "_UCell")
-  for (k in seq_along(raw_cols)) {
-    pos <- match(raw_cols[k], colnames(srt@meta.data))
-    if (!is.na(pos)) colnames(srt@meta.data)[pos] <- new_cols[k]
-  }
+  srt      <- AddModuleScore_UCell(srt, features = feats, name = paste0(prefix, "_UCell"), slot = "data", missing_genes = "skip" )
+  new_cols <- paste0(names(feats), prefix , "_UCell")# UCell names: <signame><prefix>_UCell
   list(srt = srt, cols = new_cols)
 }
 
 DefaultAssay(srt) <- "SpaNorm"
 
 # 1. Archetype modules (clean_module) → arch_AR_UCell, arch_Inflammation_UCell, ...
-res <- ucell_score(srt, clean_module, "arch_")
+res <- ucell_score(srt, clean_module, "_arch")
 srt <- res$srt; arch_mod_cols <- res$cols
 
 # 2. G1/G2/G3 group-DEG → gd_G1_UCell, gd_G2_UCell, gd_G3_UCell
-res <- ucell_score(srt, groupdeg, "gd_")
+res <- ucell_score(srt, groupdeg, "_gd")
 srt <- res$srt; mod_score_cols <- res$cols
 
 # 3. genesets2023 → gs23_*_UCell
-res <- ucell_score(srt, genesets2023, "gs23_")
+res <- ucell_score(srt, genesets2023, "_gs23")
 srt <- res$srt; gs23_cols <- res$cols
 
 # 4. Tumour + normal scores → tn_tumour_score_UCell, tn_normal_score_UCell
@@ -203,12 +200,13 @@ tn_feats <- list(
   tumour_score = tumour_markers,
   normal_score  = unique(unlist(all_marker, use.names = FALSE))
 )
-res <- ucell_score(srt, tn_feats, "tn_")
+res <- ucell_score(srt, tn_feats, "")
 srt <- res$srt; tn_cols <- res$cols
 
-# 5. Normal cell-type markers → ct_*_UCell
-res <- ucell_score(srt, all_marker, "ct_")
-srt <- res$srt; ct_cols <- res$cols
+# 5. Meta-programs (from 6.2.3 metas) → <meta_name>_meta_UCell
+res <- ucell_score(srt, meta_programs_unlist, "_meta")
+srt <- res$srt; meta_cols <- res$cols
+
 
 cat("Module scores added. Meta.data columns:", ncol(srt@meta.data), "\n")
 
@@ -238,16 +236,9 @@ cat("\nmodule_anno:\n"); print(table(srt$module_anno, useNA = "ifany"))
 
 # ── A7. Fill final_annotation NAs with module_anno ────────────────────────────
 fa <- as.character(srt$final_annotation)
-fa[is.na(fa)] <- as.character(srt$module_anno)[is.na(fa)]
+fa[is.na(fa)] <- paste("Tumour", srt$module_anno[is.na(fa)])
 srt$final_annotation <- fa
 cat("\nfinal_annotation:\n"); print(table(srt$final_annotation, useNA = "ifany"))
-
-# ── A8. DEG + enrichment (on banksy_clusters) ─────────────────────────────────
-DefaultAssay(srt) <- "SpaNorm"
-Idents(srt) <- "banksy_clusters"
-DEG <- FindAllMarkers(srt, test.use = "MAST", only.pos = TRUE)
-saveRDS(DEG, "tumour_normal_deg_spanorm.Rds")
-run_gsea_panel(DEG, gene_sets, "tumour_normal_deg_enrich.Rds")
 
 # ── A9. Save ───────────────────────────────────────────────────────────────────
 qs_save(srt, "tumour_normal_anno_srt.qs2")
@@ -270,7 +261,7 @@ grad2 <- scale_colour_gradient2(low = "steelblue", mid = "white", high = "indian
                                  midpoint = 0)
 
 # ── B0. Helper: FeaturePlot with auto-scaled height ───────────────────────────
-fp_save <- function(srt, feats, red, outfile, ncol = 3, dpi = 150) {
+fp_save <- function(srt, feats, red, outfile, ncol = 3, dpi = 400) {
   feats <- feats[feats %in% colnames(srt@meta.data)]
   if (length(feats) == 0) return(invisible(NULL))
   nrows <- ceiling(length(feats) / ncol)
@@ -313,45 +304,36 @@ barplot_comp <- function(meta, group_var, fill_var, fill_pal, outfile) {
 # ── B1. SpaNorm UMAP ───────────────────────────────────────────────────────────
 cat("SpaNorm plots...\n")
 
-ggsave(file.path(spanorm_dir, "1_DimPlot_cell_type.png"),
-       DimPlot(srt, reduction = "umap", group.by = "cell_type",
-               cols = ct_pal, raster = FALSE) +
-         ggtitle(paste(i, "— cell type")),
-       width = 9, height = 7, dpi = 150)
+p_ct   <- DimPlot(srt, reduction = "umap", group.by = "cell_type",
+                  cols = ct_pal, raster = FALSE) +
+            ggtitle(paste(i, "— cell type"))
+p_comp <- DimPlot(srt, reduction = "umap", group.by = "compartment",
+                  raster = FALSE) +
+            ggtitle(paste(i, "— compartment"))
+p_cl   <- DimPlot(srt, reduction = "umap", group.by = "seurat_clusters",
+                  label = TRUE, label.size = 3, repel = TRUE,
+                  cols = as.vector(polychrome()), raster = FALSE) +
+            ggtitle(sprintf("%s — SpaNorm clusters (n=%d)", i,
+                            nlevels(factor(srt$seurat_clusters)))) +
+            theme(legend.position = "none")
+p_mg   <- DimPlot(srt, reduction = "umap", group.by = "module_anno",
+                  cols = mg_pal, raster = FALSE) +
+            ggtitle(paste(i, "— module group")) +
+            theme(legend.text = element_text(size = 7))
+p_fa   <- DimPlot(srt, reduction = "umap", group.by = "final_annotation",
+                  cols = final_anno_pal, raster = FALSE) +
+            ggtitle(paste(i, "— final annotation")) +
+            theme(legend.text = element_text(size = 7))
+p_sub  <- DimPlot(srt, reduction = "umap", group.by = "subclone",
+                  label = TRUE, label.size = 3, repel = TRUE,
+                  cols = as.vector(polychrome()), raster = FALSE) +
+            ggtitle(paste(i, "— subclone"))
 
-ggsave(file.path(spanorm_dir, "2_DimPlot_compartment.png"),
-       DimPlot(srt, reduction = "umap", group.by = "compartment",
-               raster = FALSE) +
-         ggtitle(paste(i, "— compartment")),
-       width = 8, height = 7, dpi = 150)
+ggsave(file.path(spanorm_dir, "1_DimPlot_combined.png"),
+       (p_ct | p_comp | p_cl) / (p_mg | p_fa | p_sub),
+       width = 27, height = 14, dpi = 150)
 
-ggsave(file.path(spanorm_dir, "3_DimPlot_clusters.png"),
-       DimPlot(srt, reduction = "umap", group.by = "seurat_clusters",
-               label = TRUE, label.size = 3, repel = TRUE,
-               cols = as.vector(polychrome()), raster = FALSE) +
-         ggtitle(sprintf("%s — SpaNorm clusters (n=%d)", i,
-                         nlevels(factor(srt$seurat_clusters)))) +
-         theme(legend.position = "none"),
-       width = 8, height = 7, dpi = 150)
 
-ggsave(file.path(spanorm_dir, "4_DimPlot_module_anno.png"),
-       DimPlot(srt, reduction = "umap", group.by = "module_anno",
-               cols = mg_pal, raster = FALSE) +
-         ggtitle(paste(i, "— module group")) +
-         theme(legend.text = element_text(size = 7)),
-       width = 9, height = 7, dpi = 150)
-
-ggsave(file.path(spanorm_dir, "5_DimPlot_final_annotation.png"),
-       DimPlot(srt, reduction = "umap", group.by = "final_annotation",
-               cols = final_anno_pal, raster = FALSE) +
-         ggtitle(paste(i, "— final annotation")) +
-         theme(legend.text = element_text(size = 7)),
-       width = 10, height = 7, dpi = 150)
-
-ggsave(file.path(spanorm_dir, "6_FeaturePlot_tumour_markers.png"),
-       FeaturePlot(srt, reduction = "umap", features = tumour_markers,
-                   ncol = 3, order = TRUE),
-       width = 12, height = 12, dpi = 150)
 
 fp_save(srt, arch_mod_cols,  "umap", file.path(spanorm_dir, "7_FeaturePlot_archetype_modules.png"))
 fp_save(srt, mod_score_cols, "umap", file.path(spanorm_dir, "8_FeaturePlot_G123_scores.png"), ncol = 3)

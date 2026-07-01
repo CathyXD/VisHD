@@ -257,14 +257,14 @@ ct_pal  <- setNames(as.vector(polychrome())[seq_along(ct_lvls)], ct_lvls)
 final_anno_pal <- c(ct_pal, mg_pal)
 final_anno_pal <- final_anno_pal[!duplicated(names(final_anno_pal))]
 
-grad2 <- scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
-                                 midpoint = 0)
-
 # ── B0. Helper: FeaturePlot with auto-scaled height ───────────────────────────
 fp_save <- function(srt, feats, red, outfile, ncol = 3, dpi = 400) {
   feats <- feats[feats %in% colnames(srt@meta.data)]
   if (length(feats) == 0) return(invisible(NULL))
   nrows <- ceiling(length(feats) / ncol)
+  mid   <- median(unlist(srt@meta.data[, feats, drop = FALSE]), na.rm = TRUE)
+  grad2 <- scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
+                                   midpoint = mid)
   p <- FeaturePlot(srt, reduction = red, features = feats, ncol = ncol, order = TRUE)
   ggsave(outfile, p & grad2,
          width = ncol * 4, height = nrows * 3.5,
@@ -335,14 +335,17 @@ ggsave(file.path(spanorm_dir, "1_DimPlot_combined.png"),
 
 
 
-fp_save(srt, arch_mod_cols,  "umap", file.path(spanorm_dir, "7_FeaturePlot_archetype_modules.png"))
-fp_save(srt, mod_score_cols, "umap", file.path(spanorm_dir, "8_FeaturePlot_G123_scores.png"), ncol = 3)
-fp_save(srt, tn_cols,        "umap", file.path(spanorm_dir, "9_FeaturePlot_tumour_normal_scores.png"), ncol = 2)
+fp_save(srt, arch_mod_cols,  "umap", file.path(spanorm_dir, "FeaturePlot_archetype_modules.png"))
+fp_save(srt, mod_score_cols, "umap", file.path(spanorm_dir, "FeaturePlot_G123_scores.png"), ncol = 3)
+fp_save(srt, tn_cols,        "umap", file.path(spanorm_dir, "FeaturePlot_tumour_normal_scores.png"), ncol = 2)
 
 if (length(gs23_cols) > 0)
   fp_save(srt, gs23_cols, "umap",
-          file.path(spanorm_dir, "10_FeaturePlot_genesets2023.png"), ncol = 4)
+          file.path(spanorm_dir, "FeaturePlot_genesets2023.png"), ncol = 4)
 
+score_meta_programs(srt, meta_programs, meta_cols = meta_cols,
+                            out_dir = spanorm_dir,
+                            reductions = c( "umap"))
 # ── B2. Pearson PCA UMAP ───────────────────────────────────────────────────────
 cat("Pearson PCA plots...\n")
 
@@ -391,7 +394,7 @@ if (length(gs23_cols) > 0)
 # Gavish meta-program FeaturePlots across all three reductions (saves to pearson_dir)
 srt <- score_meta_programs(srt, meta_programs, meta_cols = meta_cols,
                             out_dir = pearson_dir,
-                            reductions = c("umap", "pearsonumap", "banksy0.2.umap"))
+                            reductions = c( "pearsonumap"))
 
 # ── B3. BANKSY UMAP ────────────────────────────────────────────────────────────
 cat("BANKSY plots...\n")

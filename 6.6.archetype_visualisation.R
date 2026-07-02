@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
-# 6.4.archetype_visualisation.R
+# 6.6.archetype_visualisation.R
 # Visualise the integrated-tumour archetypal analysis results produced by
-# 6.3.integrate_tumour_archetype.ipynb (partipy, n = 4 archetypes) against the
-# actual Seurat object, in the visual style of 6.2archetype_downstream.R.
+# 6.5.integrate_tumour_archetype.ipynb (partipy, n = 4 archetypes) against the
+# actual Seurat object, in the visual style of 6.2.archetype_downstream.R.
 #
 # Renders three result families:
 #   1. Archetype weights   (per-cell membership on UMAP + spatial + composition)

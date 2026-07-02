@@ -4,8 +4,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=200G
 #SBATCH --time=12:00:00
-#SBATCH --job-name=infercnv_tumour_anno
-#SBATCH --output="slurmout/4.6.infercnv_tumour_anno-%j.out"
+#SBATCH --job-name=infercnv_integrative
+#SBATCH --output="slurmout/10.5.integrative_infercnv-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -31,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/4.6.infercnv_tumour_anno.R
+  Rscript ~/VisHD/9.5.integrative_infercnv.r

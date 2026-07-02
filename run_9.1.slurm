@@ -2,10 +2,11 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=80G
-#SBATCH --time=03:00:00
-#SBATCH --job-name=signature_analysis
-#SBATCH --output="slurmout/6.2.3.signature_analysis-%j.out"
+#SBATCH --mem=50G
+#SBATCH --time=2:00:00
+#SBATCH --job-name=tn_persample
+#SBATCH --array=1-8
+#SBATCH --output="slurmout/10.1.per_sample_tumour_normal-%j-%a.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -31,4 +32,5 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/6.2.3.signature_analysis.R
+  Rscript ~/VisHD/9.1.per_sample_tumour_normal.R "$SLURM_ARRAY_TASK_ID"
+

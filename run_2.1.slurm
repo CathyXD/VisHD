@@ -9,7 +9,7 @@
 #SBATCH --job-name=second_round_check
 #SBATCH --array=1-8
 #SBATCH --partition=work
-#SBATCH --output="slurmout/2.4.second_round_check-%j-%a.out"
+#SBATCH --output="slurmout/2.1.second_round_check-%j-%a.out"
 
 dir="${MYSCRATCH}"
 libpath="/scratch/pawsey1172/sweng/R_Library/4.5"
@@ -38,4 +38,4 @@ imagename=${image##*/}
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/2.4.second_round_check.R "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/2.1.second_round_check.R "$SLURM_ARRAY_TASK_ID"

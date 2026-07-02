@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# 6.2archetype_downstream.R
+# 6.2.archetype_downstream.R
 # Cross-sample downstream analysis of archetypal analysis results.
 # Reads per-sample archetype_result/ CSVs + native tumour_srt.qs2, then:
 #   - Aggregates archetype expression and pathway enrichment across all 8 samples

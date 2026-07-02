@@ -1,12 +1,11 @@
 #!/bin/bash -l
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=150G
-#SBATCH --time=3:00:00
-#SBATCH --job-name=pubsig
-#SBATCH --array=1-8
-#SBATCH --output="slurmout/4.4.public_signature_exp-%j-%a.out"
+#SBATCH --time=5:00:00
+#SBATCH --job-name=integrate_tumour_anno
+#SBATCH --output="slurmout/4.4.integrate_tumour_anno-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -32,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/4.4.public_signature_exp.R "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/4.4.integrate_tumour_anno_srt.R

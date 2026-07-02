@@ -50,64 +50,86 @@ Scripts are numbered by their order of execution:
 | `7.1.integration_cells.R` | Merge raw counts from all 8 slides, run scPearsonPCA (with and without batch correction by `slide`), compute archetype + tumour/normal module scores, export to `.h5ad`; outputs to `integration/` |
 | `LUT-245-XX/4.refine_cnv.Rmd` | Per-sample interactive CNV refinement notebook |
 
-## tumour_anno Rerun DAG (stages 4–9)
+## tumour_anno Rerun DAG (stages 4–10)
 
 The downstream pipeline is re-run whenever the per-sample tumour/normal split is
 refined. The corrected split lives in the `tumour_anno` field of the per-sample
-object **`LUT-245-XX/tumour_subclone_srt.qs2`** — this is the canonical entry input
-for stages 4.1/4.2/4.4/7.1 (it replaced the older `tumour_anno_srt.qs2`). Cells
-labelled `"Removed"` are dropped by 4.4 and 7.1 before processing.
+object **`LUT-245-XX/tumour_subclone_srt.qs2`** — the canonical entry input for
+`4.1`/`4.2`/`4.3` and `9.1`. Cells labelled `"Removed"` are dropped during the
+tumour/normal splits before processing.
+
+> **Numbering note:** scripts were renumbered to a contiguous sequence (`0.1 → 10.1`).
+> The legacy binned track and the old `7.1.integration_cells.R` (hardcoded-cluster
+> split) were retired to `bin/`, and stages 8–11 were cascaded down one to fill the
+> gap. Output **directory** names were left untouched, so a script may write to a dir
+> whose number no longer matches its own (e.g. `4.4.integrate_tumour_anno_srt.R` →
+> `4.5.integrate_tumour_anno/`). Paths below are the real on-disk dir names.
 
 **Script roles + I/O (read → write):**
 
 | Script | Mode | Reads | Writes |
 |--------|------|-------|--------|
-| `4.1.tumour_split.R` | per-sample (array 1-8) | `tumour_subclone_srt.qs2` (keeps `tumour_anno=="Tumour"`) | `LUT-245-XX/tumour/tumour_srt.qs2` + `tumour/tumour.h5ad` |
-| `4.2.normal_split.R` | per-sample (array 1-8) | `tumour_subclone_srt.qs2` (keeps `"Normal"`) | `LUT-245-XX/normal/normal_srt.qs2` |
-| `4.4.public_signature_exp.R` | per-sample (array 1-8) | `tumour_subclone_srt.qs2` (drops `"Removed"`) | `tumour_subclone_srt_with_public_signatures.qs2` |
-| `7.1.integration_cells.R` | run-once | all 8 `tumour_subclone_srt.qs2` (drops `"Removed"`) | `integration/integrated_pearson_srt.qs2` (+`.h5ad`) |
-| `4.5.integrate_tumour_anno_srt.R` | run-once | all 8 `tumour/tumour_srt.qs2` (tumour-only) | `4.5.integrate_tumour_anno/integrated_pearson_srt.qs2` + `integrated_tumour_anno.h5ad` |
-| `5.1.0.DT_deg.R` | per-sample (array 1-8) | `tumour/tumour_srt.qs2` | `tumour/deg_DTvsCB_*.Rds`, `enrich_*.Rds` |
-| `5.1.1.aggregate_DT_deg.R` | run-once | per-sample 5.1.0 `.Rds` | `5.1.aggregate_results/` |
-| `5.2.integrate_DESeq2_deg.R` | run-once | per-sample `tumour/tumour_srt.qs2` | `5.2.DESeq2_results/` (pseudobulk DESeq2) |
-| `5.3.tumour_expression_proportion.R` | run-once | `tumour/tumour_srt.qs2` + 5.2 results | `5.3.expression_proportion/` |
-| `6.1.archetypal_analysis_tumour.ipynb` | per-sample (array 1-8, `SAMPLE_IDX`) | `tumour/tumour.h5ad` | `tumour/archetype_result/` |
-| `6.2archetype_downstream.R` | run-once | per-sample `archetype_result/` | `6.2archetype_downstream_tumour/` |
-| `6.3.integrate_tumour_archetype.ipynb` | run-once | `4.5.../integrated_tumour_anno.h5ad` | `6.3.integrate_tumour_archetype/` |
-| `6.4.archetype_visualisation.R` | run-once | `4.5.../integrated_pearson_srt.qs2` + 6.3 csv | `6.3.integrate_tumour_archetype/viz/` |
-| `8.1.0.normalcell_integration_pearson.r` | run-once | all 8 `normal/normal_srt.qs2` | `8.1.normal_cell_integration/integrated_pearson_srt2.qs2` + `integrated_normal_cells2.h5ad` |
-| `9.1.normalcell_annotation.py` | run-once | `8.1.../integrated_normal_cells2.h5ad` | `9.normalcell_annotation/` (SCimilarity hints) |
-| `9.2.scimilarity_check.R` | run-once | `8.1.../integrated_pearson_srt2.qs2` + 9.1 hints | `9.2.scimilarity_check/` |
-| `9.3.DEG_cluster_annotation.R` | run-once | `9.2.../normal_srt_annotated.qs2` | `9.3.DEG_cluster_annotation/` |
+| `4.1.tumour_split.R` | per-sample (1-8) | `tumour_subclone_srt.qs2` (keeps `Tumour`) | `tumour/tumour_srt.qs2` + `tumour/tumour.h5ad` |
+| `4.2.normal_split.R` | per-sample (1-8) | `tumour_subclone_srt.qs2` (keeps `Normal`) | `normal/normal_srt.qs2` |
+| `4.3.public_signature_exp.R` | per-sample (1-8) | `tumour_subclone_srt.qs2` (drops `Removed`) | `tumour_anno_srt_with_public_signatures.qs2` |
+| `4.4.integrate_tumour_anno_srt.R` | run-once | all 8 `tumour/tumour_srt.qs2` | `4.5.integrate_tumour_anno/integrated_pearson_srt.qs2` (+`.h5ad`) |
+| `4.5.infercnv_tumour_anno.R` | run-once | `4.5.../integrated_pearson_srt.qs2` | InferCNV (**excluded** from rerun — needs a Normal reference the tumour-only integration lacks) |
+| `5.1.DT_deg.R` | per-sample (1-8) | `tumour/tumour_srt.qs2` | `tumour/deg_DTvsCB_*.Rds`, `enrich_*.Rds` |
+| `5.2.aggregate_DT_deg.R` | run-once | per-sample 5.1 `.Rds` | `5.1.aggregate_results/` |
+| `5.3.integrate_DESeq2_deg.R` | run-once | per-sample `tumour/tumour_srt.qs2` | `5.2.DESeq2_results/` (pseudobulk DESeq2) |
+| `5.4.tumour_expression_proportion.R` | run-once | `tumour/tumour_srt.qs2` + 5.3 results | `5.3.expression_proportion/` |
+| `6.1.archetypal_analysis_tumour.ipynb` | per-sample (1-8, `SAMPLE_IDX`) | `tumour/tumour.h5ad` | `tumour/archetype_result/` |
+| `6.2.archetype_downstream.R` | run-once | per-sample `archetype_result/` | `6.2archetype_downstream_tumour/` |
+| `6.3.archetype_module.r` | run-once | 6.2 downstream outputs | archetype/`groupdeg` module gene sets |
+| `6.4.signature_analysis.R` | run-once | `tumour/tumour_srt.qs2` + 6.3 groupdeg | `6.2.3.signature_analysis/` |
+| `6.5.integrate_tumour_archetype.ipynb` | run-once | `4.5.../integrated_tumour_anno.h5ad` | `6.3.integrate_tumour_archetype/` |
+| `6.6.archetype_visualisation.R` | run-once | `4.5.../integrated_pearson_srt.qs2` + 6.5 csv | `6.3.integrate_tumour_archetype/viz/` |
+| `7.1.normalcell_integration_pearson.r` | run-once | all 8 `normal/normal_srt.qs2` | `8.1.normal_cell_integration/integrated_pearson_srt2.qs2` (+`.h5ad`) |
+| `7.2.infercnv_check.R` | run-once | `8.1.../integrated_pearson_srt2.qs2` | InferCNV check (read-only) |
+| `7.3.normalcell_integration_scvi.r` | run-once | all 8 `normal/normal_srt.qs2` | scVI normal integration (alternative to 7.1) |
+| `8.1.scimilarity_check.R` | run-once | `8.1.../integrated_pearson_srt2.qs2` + SCimilarity hints | `9.2.scimilarity_check/normal_srt_annotated.qs2` |
+| `8.2.DEG_cluster_annotation.R` | run-once | `9.2.../normal_srt_annotated.qs2` | `9.3.DEG_cluster_annotation/normal_srt_DEcluster.qs2` |
+| `8.3.additional_visual.R` | run-once | `9.3.../normal_srt_DEcluster.qs2` | extra cluster visuals (chained after 8.2) |
+| `8.4.final_clear_normal_integration.R` | run-once | `9.3.../normal_srt_DEcluster.qs2` | `9.4.1.final_clear_normal_integration/normal_srt_final_anno.qs2` (+`final_annotation.csv`) |
+| `8.5.additional_analysis.R` | run-once | `9.4.1.../normal_srt_final_anno.qs2` | final-annotation analysis / viz |
+| `8.6.final_clear_normal_persample.R` | per-sample (1-8) | `normal/normal_srt.qs2` + 8.4 `final_annotation.csv` | `normal/normal_anno_srt.qs2` |
+| `9.1.per_sample_tumour_normal.R` | per-sample (1-8) | `tumour/tumour_srt.qs2` + `normal/normal_anno_srt.qs2` + `tumour_subclone_srt.qs2` | `tumour_normal_anno_srt.qs2` |
+| `9.2.per_sample_visual.R` | per-sample (1-8) | `tumour_normal_anno_srt.qs2` | per-sample visuals |
+| `9.3.aggreate_cell_composition_analysis.R` | run-once | all 8 `tumour_normal_anno_srt.qs2` | `10.0.1.aggregate_cell_composition/` |
+| `9.4.tumour_normal_integration.R` | run-once | all 8 `tumour_normal_anno_srt.qs2` | `10.0.tumour_normal_integration/integrated_pearson_srt.qs2` |
+| `9.5.integrative_infercnv.r` | run-once | `10.0.tumour_normal_integration/...` | InferCNV on the integrated object |
+| `10.1.Statial.R` | run-once | all 8 `tumour_normal_anno_srt.qs2` | `combined_sce.qs2` (Statial Kontextual + SpatioMark) |
 
-The integrated archetype (6.3/6.4) and normal-annotation (9.1–9.3) branches were
-**repointed off** the old `1.3.integrate_tumour_normal_split.r` / `1.integrate_raw_cell/`
-objects (hardcoded-cluster split, decoupled from per-sample `tumour_anno`) onto the
-tumour_anno-derived integrations (4.5 for tumour, 8.1.0 for normal) so they reflect the
-refined split. `4.6.infercnv_tumour_anno` is **excluded** — it needs Normal cells as
-the InferCNV reference, which the now tumour-only 4.5 output no longer provides.
+Stage groups: **7** = normal-cell integration, **8** = normal annotation, **9** =
+tumour/normal combined, **10** = spatial statistics.
 
-**Wave structure** (submit with `sbatch --dependency=afterok:<jid>`; each wave's jobs
-are mutually independent and run in parallel):
+**Wave structure** (submit with `sbatch --dependency=afterok:<jid>`; jobs within a
+wave are mutually independent and run in parallel):
 
 ```
-Wave 1:  4.1 · 4.2 · 4.4 · 7.1                       (entry; 4.x are array 1-8)
-Wave 2:  4.5 · 5.1.0 · 5.2 · 6.1  ← 4.1              8.1.0 ← 4.2
-Wave 3:  5.1.1 ← 5.1.0 ;  5.3 ← 5.2 ;  6.2 ← 6.1 ;  6.3 ← 4.5 ;  9.1 ← 8.1.0
-Wave 4:  6.4 ← 6.3 ;  9.2 ← (8.1.0 + 9.1)
-Wave 5:  9.3 ← 9.2
+Wave 1:  4.1 · 4.2 · 4.3                                   (entry; array 1-8)
+Wave 2:  4.4 · 5.1 · 5.3 · 6.1 ← 4.1 ;  7.1 · 7.3 ← 4.2
+Wave 3:  5.2 ← 5.1 ; 5.4 ← 5.3 ; 6.2 ← 6.1 ; 6.5 ← 4.4 ; 7.2 · 8.1 ← 7.1
+Wave 4:  6.3 ← 6.2 ; 6.6 ← 6.5 ; 8.2 ← 8.1
+Wave 5:  6.4 ← 6.3 ; 8.3 · 8.4 ← 8.2
+Wave 6:  8.5 · 8.6 ← 8.4
+Wave 7:  9.1 ← 4.1 + 8.6                                   (per-sample; array 1-8)
+Wave 8:  9.2 · 9.3 · 9.4 · 10.1 ← 9.1
+Wave 9:  9.5 ← 9.4
 ```
 
-Critical paths: normal `4.2 → 8.1.0 → 9.1 → 9.2 → 9.3`; tumour `4.1 → 4.5 → 6.3 → 6.4`.
+Critical paths: normal `4.2 → 7.1 → 8.1 → 8.2 → 8.4 → 8.6 → 9.1`; tumour
+`4.1 → 4.4 → 6.5 → 6.6`; combined `9.1 → 9.4 → 9.5`.
 
 **Slurm wrapper resource tiers** (`run_<step>.slurm`, `--partition=work --account=pawsey1172`):
-- **Single tumour/normal object** (4.1, 4.2, 4.4, 5.1.DT_deg, 6.1): 80G / 1 cpu / 3 h, `--array=1-8`
-- **Integrative** (4.5, 5.2, 7.1, 8.1, 9.1): 150G / 4 cpu / 5 h  (6.3 = 200G; 9.1 SCimilarity is the most OOM-prone)
-- **Visualization / lightweight** (5.1.1, 5.3, 6.2, 6.4, 9.2, 9.3): 50G / 1 cpu / 1 h
+- **Single object / per-sample** (4.1, 4.2, 4.3, 5.1, 6.1, 8.6, 9.1, 9.2): 80G / 1 cpu / 3 h, `--array=1-8`
+- **Integrative** (4.4, 5.3, 7.1, 8.1, 9.4): 150G / 4 cpu / 5 h  (6.5 = 200G; 8.1 SCimilarity is the most OOM-prone)
+- **Visualization / lightweight** (5.2, 5.4, 6.2, 6.4, 6.6, 8.3, 8.5, 9.3): 50G / 1 cpu / 1 h
 
 To force a clean rerun, delete the existence-guarded integrated caches first
-(`4.5.../integrated_pearson_srt.qs2` + `..._tumour_anno.h5ad`, `8.1.../integrated_pearson_srt2.qs2`);
-per-sample `.qs2` are overwritten unconditionally.
+(`4.5.../integrated_pearson_srt.qs2` + `..._tumour_anno.h5ad`, `8.1.../integrated_pearson_srt2.qs2`,
+`10.0.tumour_normal_integration/integrated_pearson_srt.qs2`); per-sample `.qs2` are
+overwritten unconditionally.
 
 ## Data Layout
 

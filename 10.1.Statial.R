@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# 11.1.Statial.R   (run-once, all 8 samples)
+# 10.1.Statial.R   (run-once, all 8 samples)
 # Statial spatial analysis on the per-sample tumour+normal objects
 # (LUT-245-XX/tumour_normal_anno_srt.qs2), converted to a SingleCellExperiment
 # list keyed on the `final_annotation` cell identity.
@@ -22,7 +22,7 @@
 #   kontextual/  Kontextual result table + tumour<->normal co-localization heatmaps
 #   spatiomark/  calcStateChanges result table + state-change heatmaps / plots
 #
-#   Rscript 11.1.Statial.R
+#   Rscript 10.1.Statial.R
 #
 # NOTE: Statial (+ its Bioconductor deps) must be installed into ~/R_Library/4.5,
 #       e.g.  BiocManager::install("Statial", lib = "~/R_Library/4.5")
@@ -48,6 +48,9 @@ cat("Using", nCores, "core(s)\n")
 radii   <- c(50, 100, 200)
 maxDist <- 200          # SpatioMark: max distance considered by getDistances()
 
+# The Normal compartment is subdivided: Immune = these cell types, Stromal = the rest.
+immune_cell_types <- c("Macrophages", "B cells", "Plasma")
+
 out_dir  <- "~/VisHD/11.1.Statial"
 kon_dir  <- file.path(out_dir, "kontextual")
 spm_dir  <- file.path(out_dir, "spatiomark")
@@ -69,22 +72,30 @@ build_sce <- function(path, sample) {
   srt <- qs_read(file.path(path, "tumour_normal_anno_srt.qs2"))
   if (length(SeuratObject::Layers(srt, assay = "Spatial")) > 1)
     srt <- JoinLayers(srt, assay = "Spatial")
-
+  cell_id <- paste(sample, colnames(srt), sep = "_")
   logmat   <- GetAssayData(srt, assay = "SpaNorm", layer = "data")     # continuous expr
+  colnames(logmat) <- cell_id
   countmat <- GetAssayData(srt, assay = "Spatial", layer = "counts")
-
+  colnames(countmat) <- cell_id
   # Coords live in the FOV; rows are ordered 1:n with the barcode in coords$cell.
   coords <- GetTissueCoordinates(srt, which = "centroids")
   idx    <- match(colnames(srt), coords$cell)
   stopifnot(!anyNA(idx))
 
+  cellty <- as.character(srt$final_annotation)
+  comp   <- as.character(srt$compartment)
+  # Subdivide the Normal compartment into Immune vs Stromal.
+  is_normal <- comp == "Normal"
+  comp[is_normal] <- ifelse(cellty[is_normal] %in% immune_cell_types,
+                            "Immune", "Stromal")
+
   cd <- S4Vectors::DataFrame(
-    cellType    = as.character(srt$final_annotation),
-    compartment = as.character(srt$compartment),
+    cellType    = cellty,
+    compartment = comp,
     imageID     = sample,
     x           = coords$x[idx],
     y           = coords$y[idx],
-    row.names   = colnames(srt)
+    row.names   = cell_id
   )
   sce <- SingleCellExperiment(
     assays  = list(logcounts = logmat, counts = countmat),
@@ -101,19 +112,24 @@ sce_list <- Map(build_sce, paths, samples)
 common   <- Reduce(intersect, lapply(sce_list, rownames))
 sce_list <- lapply(sce_list, function(s) s[common, ])
 sce      <- do.call(SingleCellExperiment::cbind, sce_list)
+qs_save(sce, file.path(out_dir, "combined_sce.qs2"))
 rm(sce_list); gc()
 cat("Combined SCE:", ncol(sce), "cells across", length(samples), "images,",
     nrow(sce), "genes\n")
 
 # ── Auto-detect tumour groups vs the normal parent population ──────────────────
-comp_map     <- unique(as.data.frame(colData(sce)[, c("cellType", "compartment")]))
-tumour_types <- sort(comp_map$cellType[comp_map$compartment == "Tumour"])
-normal_types <- sort(comp_map$cellType[comp_map$compartment == "Normal"])
-all_types    <- sort(unique(as.character(sce$cellType)))
+comp_map      <- unique(as.data.frame(colData(sce)[, c("cellType", "compartment")]))
+tumour_types  <- sort(comp_map$cellType[comp_map$compartment == "Tumour"])
+immune_types  <- sort(comp_map$cellType[comp_map$compartment == "Immune"])
+stromal_types <- sort(comp_map$cellType[comp_map$compartment == "Stromal"])
+non_tumour_types <- c(immune_types, stromal_types)          # all Normal (Immune + Stromal)
+all_types     <- sort(unique(as.character(sce$cellType)))
 cat("\nTumour groups (", length(tumour_types), "): ",
     paste(tumour_types, collapse = ", "), "\n", sep = "")
-cat("Normal types  (", length(normal_types), "): ",
-    paste(normal_types, collapse = ", "), "\n\n", sep = "")
+cat("Immune types  (", length(immune_types), "): ",
+    paste(immune_types, collapse = ", "), "\n", sep = "")
+cat("Stromal types (", length(stromal_types), "): ",
+    paste(stromal_types, collapse = ", "), "\n\n", sep = "")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. Kontextual — tumour <-> normal co-localization
@@ -121,16 +137,18 @@ cat("Normal types  (", length(normal_types), "): ",
 cat("Running Kontextual...\n")
 
 # parentCombinations builds (from, to, parent) triples: `from` drawn from each
-# parent population, `to` drawn from `all`. Two parents -> tumour and normal.
+# parent population, `to` drawn from `all`. Three parents -> tumour, immune, stromal.
 parentDf <- parentCombinations(
-  all    = all_types,
-  tumour = tumour_types,
-  normal = normal_types
+  all     = all_types,
+  tumour  = tumour_types,
+  immune  = immune_types,
+  stromal = stromal_types
 )
 
-# Focus on tumour <-> normal only (drop tumour-tumour / normal-normal pairs).
-cross <- (parentDf$from %in% tumour_types & parentDf$to %in% normal_types) |
-         (parentDf$from %in% normal_types & parentDf$to %in% tumour_types)
+# Focus on tumour <-> (immune|stromal) only; drop within-compartment pairs
+# (tumour-tumour, immune/stromal-immune/stromal).
+cross <- (parentDf$from %in% tumour_types     & parentDf$to %in% non_tumour_types) |
+         (parentDf$from %in% non_tumour_types & parentDf$to %in% tumour_types)
 parentDf <- parentDf[cross, , drop = FALSE]
 cat("  ", nrow(parentDf), "tumour<->normal from/to pairs\n")
 
@@ -162,9 +180,10 @@ tryCatch({
              tail(names(Filter(is.numeric, kt)), 1)
   img_col <- if ("imageID" %in% colnames(kt)) "imageID" else "image"
   kt$value <- kt[[val_col]]
-  # Orient so rows = tumour group, cols = normal type.
+  # Orient so rows = tumour group, cols = normal type (immune types then stromal).
   kt$tumour <- ifelse(kt$from %in% tumour_types, kt$from, kt$to)
-  kt$normal <- ifelse(kt$from %in% normal_types, kt$from, kt$to)
+  kt$normal <- ifelse(kt$from %in% non_tumour_types, kt$from, kt$to)
+  kt$normal <- factor(kt$normal, levels = c(immune_types, stromal_types))
 
   lim <- max(abs(kt$value), na.rm = TRUE)
   for (rr in radii) {
@@ -215,7 +234,7 @@ stateChanges <- calcStateChanges(
   cells    = sce,
   type     = "distances",
   from     = tumour_types,     # expression measured in tumour cells
-  to       = normal_types,     # relationship to proximity of each normal type
+  to       = non_tumour_types, # proximity to each immune/stromal cell type
   marker   = features,
   assay    = "logcounts",
   cellType = "cellType",

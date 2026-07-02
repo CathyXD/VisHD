@@ -4,8 +4,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=150G
 #SBATCH --time=5:00:00
-#SBATCH --job-name=tn_integration
-#SBATCH --output="slurmout/10.0.tumour_normal_integration-%j.out"
+#SBATCH --job-name=statial
+#SBATCH --output="slurmout/11.1.Statial-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -31,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/10.0.tumour_normal_integration.R
+  Rscript ~/VisHD/10.1.Statial.R

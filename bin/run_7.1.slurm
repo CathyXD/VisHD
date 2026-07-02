@@ -4,8 +4,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=150G
 #SBATCH --time=5:00:00
-#SBATCH --job-name=final_clear_norm
-#SBATCH --output="slurmout/9.4.1.final_clear_normal_integration-%j.out"
+#SBATCH --job-name=integration_cells
+#SBATCH --output="slurmout/7.1.integration_cells-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -31,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/9.4.1.final_clear_normal_integration.R
+  Rscript ~/VisHD/7.1.integration_cells.R

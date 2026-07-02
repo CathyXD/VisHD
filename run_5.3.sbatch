@@ -1,15 +1,16 @@
 #!/bin/bash -l
+# Setonix Singularity submission for 5.3.integrate_DESeq2_deg.R
+# Cross-sample pseudobulk DESeq2 (DT vs CB) + cohort B vs A (DT) analysis.
+# Memory peak is the 8-way Seurat merge + JoinLayers; reruns hit the cache.
+#SBATCH --account=pawsey1172
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=200G
-#SBATCH --time=12:00:00
-#SBATCH --job-name=infercnv_integrative
-#SBATCH --output="slurmout/10.2.integrative_infercnv-%j.out"
-#SBATCH --mail-user=Sirui.Weng@petermac.org
-#SBATCH --mail-type=ALL
-#SBATCH --account=pawsey1172
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=100G
+#SBATCH --time=02:00:00
+#SBATCH --job-name=integrate_DESeq2
 #SBATCH --partition=work
+#SBATCH --output="slurmout/5.3.integrate_DESeq2_deg-%j.out"
 
 dir="${MYSCRATCH}"
 image="docker://swweng/spatial:4.5v6"
@@ -31,4 +32,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/10.2.integrative_infercnv.r
+  Rscript ~/VisHD/5.3.integrate_DESeq2_deg.R

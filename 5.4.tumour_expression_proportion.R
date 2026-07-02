@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# 5.3.tumour_expression_proportion.R
+# 5.4.tumour_expression_proportion.R
 # Per-gene proportion of cells with positive expression (counts > 0):
 # DT vs CB across all tumour samples.
 # Output: bar plots (positive proportion per sample x category) and

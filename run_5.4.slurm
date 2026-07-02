@@ -1,11 +1,11 @@
 #!/bin/bash -l
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=150G
-#SBATCH --time=5:00:00
-#SBATCH --job-name=infercnv_check
-#SBATCH --output="slurmout/8.1.2.infercnv_check-%j.out"
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=50G
+#SBATCH --time=1:00:00
+#SBATCH --job-name=expr_proportion
+#SBATCH --output="slurmout/5.4.tumour_expression_proportion-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -31,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/8.1.2.infercnv_check.R
+  Rscript ~/VisHD/5.4.tumour_expression_proportion.R

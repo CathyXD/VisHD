@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
-# 9.4.1.2.additional_analysis.R
+# 8.5.additional_analysis.R
 # Extra analysis on the final normal annotation. Mirrors the descriptive /
-# visual half of 9.2.scimilarity_check.R, but keyed on `final_annotation`
+# visual half of 8.1.scimilarity_check.R, but keyed on `final_annotation`
 # (joined from 9.4.1's final_annotation.csv by cell_ID) instead of the
 # SCimilarity hint, and on the 9.4.1 re-embedded object.
 #

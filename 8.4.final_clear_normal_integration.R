@@ -1,10 +1,10 @@
 #!/usr/bin/env Rscript
-# 9.4.1.final_clear_normal_integration.R
+# 8.4.final_clear_normal_integration.R
 # Integrative stage of the final normal-cell cleanup. Loads the 9.3 re-embedded
 # object, freezes the curated cluster -> cell-type map (interpreted from the 9.3
 # MAST DEG + meta-program overlap on `pearson_clusters_batch`) as the FINAL
 # annotation, DROPS the discarded clusters ("Removed"), then mirrors the
-# 9.3.0.DEG_cluster_annotation.R workflow on the cleaned object: SCT-derived HVGs
+# 8.2.DEG_cluster_annotation.R workflow on the cleaned object: SCT-derived HVGs
 # + batch-corrected Pearson PCA (by slide), cluster at res 1.0, MAST DE between
 # clusters, annotation overlays on the new pearsonbatchumap, and cluster-DEG /
 # meta-program overlap. Exports the per-cell final annotation as CSV (the join
@@ -66,7 +66,7 @@ src_clu  <- as.character(srt$pearson_clusters_batch)   # basis of the curated ma
 unmapped <- setdiff(sort(unique(src_clu)), names(cluster_map))
 if (length(unmapped))
   stop("pearson_clusters_batch has unmapped levels: ", paste(unmapped, collapse = ", "),
-       " — update cluster_map at the top of 9.4.1.final_clear_normal_integration.R")
+       " — update cluster_map at the top of 8.4.final_clear_normal_integration.R")
 
 srt$source_cluster   <- src_clu                        # 9.3 cluster (kept for the CSV)
 srt$final_annotation <- unname(cluster_map[src_clu])

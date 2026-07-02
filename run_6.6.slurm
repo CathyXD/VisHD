@@ -2,11 +2,10 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=100G
-#SBATCH --time=03:00:00
-#SBATCH --job-name=pubsig_test
-#SBATCH --array=1-8
-#SBATCH --output="slurmout/4.4.pubsig-%j-%a.out"
+#SBATCH --mem=50G
+#SBATCH --time=1:00:00
+#SBATCH --job-name=archetype_viz
+#SBATCH --output="slurmout/6.6.archetype_visualisation-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -32,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/4.4.public_signature_exp.R "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/6.6.archetype_visualisation.R

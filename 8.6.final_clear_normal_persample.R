@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# 9.4.2.final_clear_normal_persample.R
+# 8.6.final_clear_normal_persample.R
 # Per-sample propagation of the final normal annotation (array 1-8). Reads the
 # final_annotation.csv written by 9.4.1, attaches it to that sample's
 # normal_srt.qs2 by bare-barcode match, drops the "Removed"/unmatched cells,
@@ -7,7 +7,7 @@
 # 4.2.normal_split.R), writes normal_anno_srt.qs2 in the sample's normal/ dir,
 # and saves an ImageDimPlot of the final annotation in tissue space.
 #
-#   Rscript 9.4.2.final_clear_normal_persample.R <sample-index 1-8>
+#   Rscript 8.6.final_clear_normal_persample.R <sample-index 1-8>
 
 suppressPackageStartupMessages({
   library(Seurat)
@@ -33,12 +33,12 @@ final_palette <- function(v, grey_level = "Removed") {
 # ── CLI arg ───────────────────────────────────────────────────────────────────
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) == 0 || is.na(suppressWarnings(as.numeric(args[1]))))
-  stop("Usage: Rscript 9.4.2.final_clear_normal_persample.R <sample-index 1-8>")
+  stop("Usage: Rscript 8.6.final_clear_normal_persample.R <sample-index 1-8>")
 sample_idx <- as.numeric(args[1])
 
 if (!file.exists(anno_csv))
   stop("Final annotation CSV not found: ", anno_csv,
-       "\nRun the integrative stage first: Rscript 9.4.1.final_clear_normal_integration.R")
+       "\nRun the integrative stage first: Rscript 8.4.final_clear_normal_integration.R")
 
 paths <- system("realpath ~/VisHD/LUT-245-*/", intern = TRUE)
 path  <- paths[sample_idx]

@@ -3,21 +3,32 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=200G
-#SBATCH --time=5:00:00
-#SBATCH --job-name=integrate_archetype
-#SBATCH --output="slurmout/integrate_archetype-%j.out"
+#SBATCH --time=12:00:00
+#SBATCH --job-name=archetype_module
+#SBATCH --output="slurmout/6.3.archetype_module-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
-#SBATCH --partition=work
 #SBATCH --account=pawsey1172
+#SBATCH --partition=work
 
-conda_env="partipy"
-source ${MYSOFTWARE}/miniconda3/bin/activate ${conda_env}
+dir="${MYSCRATCH}"
+image="docker://swweng/spatial:4.5v6"
 
-outdir="${MYSCRATCH}/VisHD/6.3.integrate_tumour_archetype"
-mkdir -p "$outdir"
+module load singularity/4.1.0-slurm
 
-jupyter nbconvert --to notebook --execute \
-  --ExecutePreprocessor.timeout=14400 \
-  --output-dir "$outdir" \
-  "${MYSCRATCH}/VisHD/6.3.integrate_tumour_archetype.ipynb"
+mkdir -p $dir
+cd ${dir}
+
+imagename=${image##*/}
+imagename=${imagename/:/_}.sif
+
+tmp_dir="/tmp/tmp_$USER"
+mkdir -p $tmp_dir
+
+srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
+  singularity exec -c \
+  -B ${tmp_dir}:/tmp \
+  -B ${dir}:$HOME \
+  -B ${tmp_dir}:/var \
+  ${imagename} \
+  Rscript ~/VisHD/6.3.archetype_module.r

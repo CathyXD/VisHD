@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# 9.3.additional_visual.R
+# 8.3.additional_visual.R
 # Extra visualisations built from 9.3.DEG_cluster_annotation.R outputs.
 #
 #  (A) Per-cluster bar plots of cluster-DEG overlap with the meta-programs:

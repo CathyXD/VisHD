@@ -1,11 +1,11 @@
 #!/bin/bash -l
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=150G
-#SBATCH --time=5:00:00
-#SBATCH --job-name=DEG_cluster_anno
-#SBATCH --output="slurmout/9.3.DEG_cluster_annotation-%j.out"
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=50G
+#SBATCH --time=1:00:00
+#SBATCH --job-name=agg_composition
+#SBATCH --output="slurmout/10.0.1.aggregate_cell_composition-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -31,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  bash -c 'Rscript ~/VisHD/9.3.0.DEG_cluster_annotation.R && Rscript ~/VisHD/9.3.1.additional_visual.R'
+  Rscript ~/VisHD/9.3.aggreate_cell_composition_analysis.R

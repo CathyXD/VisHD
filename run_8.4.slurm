@@ -2,10 +2,10 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=200G
-#SBATCH --time=12:00:00
-#SBATCH --job-name=archetype_module
-#SBATCH --output="slurmout/6.2.2.archetype_module-%j.out"
+#SBATCH --mem=150G
+#SBATCH --time=5:00:00
+#SBATCH --job-name=final_clear_norm
+#SBATCH --output="slurmout/9.4.final_clear_normal_integration-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -31,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/6.2.2.archetype_module.r
+  Rscript ~/VisHD/8.4.final_clear_normal_integration.R

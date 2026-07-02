@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# 5.2.integrate_DESeq2_deg.R
+# 5.3.integrate_DESeq2_deg.R
 # Cross-sample pseudobulk DESeq2: DT vs CB across all tumour samples.
 # Pseudobulk unit = sample x subclone x category.
 # Model: ~sample_subclone + category  (sample_subclone = paired blocking factor).

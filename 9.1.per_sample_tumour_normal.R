@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# 10.0.per_sample_tumour_normal.R   (per-sample, array 1-8)
+# 9.1.per_sample_tumour_normal.R   (per-sample, array 1-8)
 # Combine clean tumour cells (tumour/tumour_srt.qs2) and finally-annotated
 # normal cells (normal/normal_anno_srt.qs2) into one per-sample object, run
 # SpaNorm → Pearson PCA → BANKSY clustering, add module scores via UCell for
@@ -13,7 +13,7 @@
 #   spatial/    ImageDimPlot + ImageFeaturePlot (tissue-image space)
 #   barplots/   Composition bar plots grouped by cluster / category / subclone
 #
-#   Rscript 10.0.per_sample_tumour_normal.R <sample-index 1-8>
+#   Rscript 9.1.per_sample_tumour_normal.R <sample-index 1-8>
 
 suppressPackageStartupMessages({
   library(Seurat)
@@ -65,7 +65,7 @@ normal_modules <- unlist(all_marker)
 # ── CLI arg ────────────────────────────────────────────────────────────────────
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) == 0 || is.na(suppressWarnings(as.numeric(args[1]))))
-  stop("Usage: Rscript 10.0.per_sample_tumour_normal.R <sample-index 1-8>")
+  stop("Usage: Rscript 9.1.per_sample_tumour_normal.R <sample-index 1-8>")
 arg <- as.numeric(args[1])
 
 paths <- system("realpath ~/VisHD/LUT-245-*/", intern = TRUE)
@@ -509,8 +509,9 @@ idp_specs <- list(
   list(group = "cell_type",        cols = ct_pal,         title = "cell type"),
   list(group = "compartment",      cols = NULL,           title = "compartment"),
   list(group = "banksy_clusters",  cols = "polychrome",   title = "BANKSY clusters"),
-  list(group = "module_anno",      cols = mg_pal,         title = "module group"),
-  list(group = "final_annotation", cols = final_anno_pal, title = "final annotation"),
+  list(group = "pearson_clusters",  cols = "polychrome",   title = "Pearson clusters"),
+  # list(group = "module_anno",      cols = mg_pal,         title = "module group"),
+  # list(group = "final_annotation", cols = final_anno_pal, title = "final annotation"),
   list(group = "subclone",         cols = c("1" = "red", "2" = "gold", "Normal" = "grey"),   title = "subclone")
 )
 idp_plots <- lapply(idp_specs, function(s) {
@@ -541,6 +542,8 @@ for (gvar in grouping_vars) {
                file.path(barplots_dir, paste0("barplot_", gvar, "_by_cell_type.png")))
   barplot_comp(meta, gvar, "module_anno", mg_pal,
                file.path(barplots_dir, paste0("barplot_", gvar, "_by_module_anno.png")))
+  barplot_comp(meta, gvar, "final_annotation", final_anno_pal,
+               file.path(barplots_dir, paste0("barplot_", gvar, "_by_final_annotation.png")))             
 }
 
 cat("==================== ", i, " visualization done ====================\n")

@@ -1,9 +1,9 @@
 #!/usr/bin/env Rscript
-# 10.1.tumour_normal_integration.R
+# 9.4.tumour_normal_integration.R
 # Combined tumour + clean-normal integration (run-once). Places ALL clean tumour
 # cells and ALL clean normal cells into one batch-corrected Pearson PCA space.
 #   - Aggregates the 8 per-sample LUT-245-XX/tumour_normal_anno_srt.qs2 objects
-#     written by 10.0.per_sample_tumour_normal.R. Each carries both compartments:
+#     written by 9.1.per_sample_tumour_normal.R. Each carries both compartments:
 #     normal cells hold their `final_annotation`; tumour cells have NA (filled to
 #     "Tumour" below). The `cell`/`compartment`/`cell_type` columns ride along.
 # Keeps only the Spatial assay, runs do.pearson_pca(batch_variable = "slide"),
@@ -115,9 +115,9 @@ Idents(srt) <- "pearson_clusters_batch"
 n_clu <- nlevels(factor(srt$pearson_clusters_batch))
 
 # ── 7. Embedding DimPlots (pearsonbatchumap) ──────────────────────────────────
-cols = c("#8DD3C7","#FFFFB3","#BEBADA", "#FB8072", "#80B1D3", "#FDB462", "#B3DE69",
-         "#FCCDE5", "#D9D9D9", "red","red")
-anno_pal <- setNames(cols[seq_along(levels(srt$cell_type))], levels(srt$cell_type))
+cols = c("red","gold", "#8DD3C7","#FFFFB3","#BEBADA", "#FB8072", "#80B1D3", "#FDB462", "#B3DE69",
+         "#FCCDE5", "#D9D9D9")
+anno_pal <- setNames(cols[seq_along(unique(srt$cell_type))], unique(srt$cell_type))
 
 p_anno <- DimPlot(srt, reduction = "pearsonbatchumap", group.by = "cell_type",
                   cols = anno_pal) +
@@ -148,13 +148,13 @@ p_category <- DimPlot(srt, reduction = "pearsonbatchumap", group.by = "category"
 ggsave(file.path(png_dir, "3.2_DimPlot_category.png"), p_category,
        width = 8, height = 7, dpi = 300)
 # ── 8. Per-sample spatial DimPlots (ggplot on centroids; no FOV after merge) ──
-spatial_df <- srt@meta.data[, c("slide", "x_centroid", "y_centroid", "final_annotation")]
-spatial_df$final_annotation <- factor(spatial_df$final_annotation,
+spatial_df <- srt@meta.data[, c("slide", "x_centroid", "y_centroid", "final_annotation", "cell_type")]
+spatial_df$final_annotation <- factor(spatial_df$cell_type,
                                       levels = names(anno_pal))
 
 for (s in sort(unique(spatial_df$slide))) {
   d <- spatial_df[spatial_df$slide == s, ]
-  p <- ggplot(d, aes(x_centroid, y_centroid, colour = final_annotation)) +
+  p <- ggplot(d, aes(x_centroid, y_centroid, colour = cell_type)) +
     geom_point(size = 0.3) +
     scale_y_reverse() +  
     scale_colour_manual(values = anno_pal, drop = FALSE, name = "Annotation") +
@@ -164,7 +164,7 @@ for (s in sort(unique(spatial_df$slide))) {
          width = 8, height = 7, dpi = 350)
 }
 
-p_all <- ggplot(spatial_df, aes(x_centroid, y_centroid, colour = final_annotation)) +
+p_all <- ggplot(spatial_df, aes(x_centroid, y_centroid, colour = cell_type)) +
   geom_point(size = 0.15) +
   scale_y_reverse() +  
   scale_colour_manual(values = anno_pal, drop = FALSE, name = "Annotation") +
@@ -185,7 +185,7 @@ groupdeg <- readRDS(paste0("~/VisHD/6.2archetype_downstream_tumour/archetype_mod
 # barcode key in the integrated object is slide_<cell>; metas carries slide + cell
 mg_lookup <- setNames(as.character(metas$Module_group),
                       paste0(metas$slide, "_", metas$cell))
-is_tum    <- srt$final_annotation == "Tumour"
+is_tum    <- srt$compartment == "Tumour"
 module_anno          <- rep("Normal", ncol(srt))
 module_anno[is_tum]  <- mg_lookup[colnames(srt)[is_tum]]
 n_unmatched <- sum(is_tum & is.na(module_anno))
@@ -200,9 +200,14 @@ labs <- names(groupdeg)
 group_combos <- unlist(lapply(seq_along(labs), function(k)
   combn(labs, k, FUN = function(x) paste(x, collapse = "/"))))
 group_levels <- c("Neg", group_combos)
-group_pal <- c("Neg" = "lightgrey", "G1" = "red", "G2" = "gold", "G3" = "royalblue",
-               "G1/G2" = "orange", "G1/G3" = "purple", "G2/G3" = "green",
-               "G1/G2/G3" = "black")
+group_pal <- c("Neg"      = "lightblue",
+               "G1"       = "red",
+               "G2"       = "gold",
+               "G3"       = "royalblue",
+               "G1/G2"    = "orange",
+               "G1/G3"    = "purple",
+               "G2/G3"    = "green",
+               "G1/G2/G3" = "grey")
 canon   <- function(x) vapply(strsplit(x, "/"),
                               function(p) paste(sort(p), collapse = "/"), character(1))
 present <- levels(droplevels(factor(module_anno)))
@@ -248,10 +253,33 @@ ggsave(file.path(png_dir, "11_spatial_module_group_all.png"), p_mg_all,
 DefaultAssay(srt) <- "Spatial"
 srt   <- NormalizeData(srt, verbose = FALSE)
 feats <- lapply(groupdeg, function(g) intersect(g, rownames(srt)))
-srt   <- AddModuleScore_UCell(srt, features = feats, name = "GDmod_")
-mod_cols <- paste0("module_", names(groupdeg))            # module_G1/G2/G3
-names(srt@meta.data)[match(paste0("GDmod_", seq_along(feats)),
-                           names(srt@meta.data))] <- mod_cols
+srt   <- AddModuleScore_UCell(srt, features = feats, name = "_GDmod")
+mod_cols <- paste0(names(groupdeg), "_GDmod")            # module_G1/G2/G3
+# FeaturePlot (UMAP) — steelblue/white/indianred gradient2 centred at 0
+p_feat <- FeaturePlot(srt, reduction = "pearsonbatchumap", features = mod_cols,
+                      ncol = length(mod_cols), order = TRUE) &
+  scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
+                         midpoint = 0)
+ggsave(file.path(png_dir, "12_FeaturePlot_UCellmodules.png"), p_feat,
+       width = 5 * length(mod_cols), height = 5, dpi = 300)
+
+# Spatial FeaturePlot per module (ggplot on centroids, faceted by slide)
+for (m in mod_cols) {
+  d <- srt@meta.data[, c("slide", "x_centroid", "y_centroid", m)]
+  p <- ggplot(d, aes(x_centroid, y_centroid, colour = .data[[m]])) +
+    geom_point(size = 0.15) +
+    scale_y_reverse() +
+    scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
+                           midpoint = 0, name = m) +
+    facet_wrap(~ slide, scales = "free", ncol = 4) +
+    ggtitle(m) + theme_classic() + theme(aspect.ratio = 1)
+  ggsave(file.path(png_dir, paste0("13_spatial_UCell_", m, ".png")), p,
+         width = 20, height = 10, dpi = 300, limitsize = FALSE)
+}
+
+srt <- AddModuleScore(srt, features = feats, name = "Module", assay = "Spatial")
+colnames(srt@meta.data)[grep("Module", colnames(srt@meta.data))] <- paste0("Module_", names(groupdeg))  # Module_G1/G2/G3
+mod_cols <- paste0("Module_", names(groupdeg)) 
 
 # FeaturePlot (UMAP) — steelblue/white/indianred gradient2 centred at 0
 p_feat <- FeaturePlot(srt, reduction = "pearsonbatchumap", features = mod_cols,

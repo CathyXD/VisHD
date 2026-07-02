@@ -6,6 +6,7 @@
 
 # 3. Explicitly include (track) your requested formats
 !*.R
+!*.r
 !*.Rmd
 !*.slurm
 !*.sh
@@ -15,6 +16,7 @@
 
 # 3. Now, un-ignore all .txt files in any directory
 !**/*.R
+!**/*.r
 !**/*.Rmd
 !**/*.html
 !**/*.sbatch

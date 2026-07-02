@@ -930,7 +930,7 @@ score_meta_programs <- function(obj, meta_programs, meta_cols, out_dir,
 
   for (sheet in names(meta_programs)) {
     # Columns for this sheet: ucell_score named them _meta<SheetName>.<ProgramName>_UCell
-    sheet_pat  <- paste0("^_meta", make.names(sheet), "\\.")
+    sheet_pat  <- paste0("^", make.names(sheet))
     sheet_cols <- grep(sheet_pat, meta_cols, value = TRUE)
     sheet_cols <- sheet_cols[sheet_cols %in% colnames(obj@meta.data)]
     if (length(sheet_cols) == 0) next
@@ -940,15 +940,18 @@ score_meta_programs <- function(obj, meta_programs, meta_cols, out_dir,
     base   <- make.names(sheet)
     plots_s <- lapply(sheet_cols, function(f) {
       v   <- obj@meta.data[[f]]
-      mid <- (max(v, na.rm = TRUE) + min(v, na.rm = TRUE)) / 2
+      mid <- (max(v, na.rm = TRUE) + min(v, na.rm = TRUE)) * 0.3
+      tt <- gsub(paste0(sheet, "."), fix = T, "", f)
+      tt <- gsub(".", " ",fix = T, tt)
+      tt <- gsub("_meta_UCell", "", tt)
       FeaturePlot(obj, features = f, reduction = reductions) +
         scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred",
-                              midpoint = mid)
+                              midpoint = mid) + ggtitle(tt)
     })
     g <- patchwork::wrap_plots(plots_s, ncol = ncol_g)
     ggsave(file.path(out_dir, paste0("meta_", base, tag, reductions, ".png")),
            plot = g, width = ncol_g * 4, height = nrow_g * 3.5,
-           dpi = 200, limitsize = FALSE)
+           dpi = 300, limitsize = FALSE)
   }
 }
 

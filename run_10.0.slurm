@@ -2,8 +2,8 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=120G
-#SBATCH --time=6:00:00
+#SBATCH --mem=50G
+#SBATCH --time=2:00:00
 #SBATCH --job-name=tn_persample
 #SBATCH --array=1-8
 #SBATCH --output="slurmout/10.0.per_sample_tumour_normal-%j-%a.out"

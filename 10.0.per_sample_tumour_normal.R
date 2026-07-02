@@ -84,14 +84,14 @@ for (d in c(spanorm_dir, pearson_dir, banksy_dir, spatial_dir, barplots_dir))
 
 
 # ── Palette helpers (needed in both load and processing paths) ─────────────────
-group_pal <- c("Neg"      = "lightgrey",
+group_pal <- c("Neg"      = "lightblue",
                "G1"       = "red",
                "G2"       = "gold",
                "G3"       = "royalblue",
                "G1/G2"    = "orange",
                "G1/G3"    = "purple",
                "G2/G3"    = "green",
-               "G1/G2/G3" = "black")
+               "G1/G2/G3" = "grey")
 canon <- function(x) vapply(strsplit(x, "/"),
                             function(p) paste(sort(p), collapse = "/"), character(1))
 
@@ -251,7 +251,8 @@ cat("==================== ", i, " processing done ====================\n")
 # ════════════════════════════════════════════════════════════════════════════════
 
 ct_lvls <- sort(unique(as.character(srt$cell_type)))
-ct_pal  <- setNames(as.vector(polychrome())[seq_along(ct_lvls)], ct_lvls)
+ct_pal  <- setNames(as.vector(brewer.set3(length(ct_lvls))), ct_lvls)
+ct_pal[grep("Tumour", names(ct_pal))] <- c("red", "gold", "orange")[seq_along(grep("Tumour", names(ct_pal)))]
 
 # Combined palette for final_annotation (normal cell types + G-group labels)
 final_anno_pal <- c(ct_pal, mg_pal)
@@ -264,8 +265,29 @@ fp_save <- function(srt, feats, red, outfile, ncol = 3, dpi = 400) {
   nrows <- ceiling(length(feats) / ncol)
   plots <- lapply(feats, function(f) {
     v   <- srt@meta.data[[f]]
-    mid <- (max(v, na.rm = TRUE) + min(v, na.rm = TRUE)) / 2
+    mid <- (max(v, na.rm = TRUE) + min(v, na.rm = TRUE)) *0.3
     FeaturePlot(srt, reduction = red, features = f, order = TRUE) +
+      scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
+                             midpoint = mid)
+  })
+  p <- patchwork::wrap_plots(plots, ncol = ncol)
+  ggsave(outfile, p,
+         width = ncol * 4, height = nrows * 3.5,
+         dpi = dpi, limitsize = FALSE)
+}
+
+# ── B0. Helper: ImageFeaturePlot with per-feature gradient2 midpoint ───────────
+ifp_save <- function(srt, feats, outfile, ncol = 4, dpi = 150) {
+  feats <- unique(feats[feats %in% rownames(srt) |
+                        feats %in% colnames(srt@meta.data)])
+  if (length(feats) == 0) return(invisible(NULL))
+  nrows <- ceiling(length(feats) / ncol)
+  plots <- lapply(feats, function(f) {
+    v   <- FetchData(srt, vars = f)[[1]]
+    mid <- (max(v, na.rm = TRUE) + min(v, na.rm = TRUE)) * 0.3
+    ImageFeaturePlot(srt, features = f, size = 0.3) +
+      scale_fill_gradient2(low = "steelblue", mid = "white", high = "indianred",
+                           midpoint = mid) +
       scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
                              midpoint = mid)
   })
@@ -303,6 +325,8 @@ barplot_comp <- function(meta, group_var, fill_var, fill_pal, outfile) {
     scale_y_continuous(labels = scales::percent) + labs(y = "proportion")
   w <- max(8, length(lvls_g) * 0.5 + 3)
   ggsave(outfile, p_count / p_prop, width = w, height = 10, dpi = 150, limitsize = FALSE)
+  comp_out <- setNames(comp, c(group_var, fill_var, "Freq"))
+  write.csv(comp_out, sub("\\.png$", ".csv", outfile), row.names = FALSE)
 }
 
 # ── B1. SpaNorm UMAP ───────────────────────────────────────────────────────────
@@ -314,11 +338,11 @@ p_ct   <- DimPlot(srt, reduction = "umap", group.by = "cell_type",
 p_comp <- DimPlot(srt, reduction = "umap", group.by = "compartment",
                   raster = FALSE) +
             ggtitle(paste(i, "— compartment"))
-p_cl   <- DimPlot(srt, reduction = "umap", group.by = "seurat_clusters",
+p_cl   <- DimPlot(srt, reduction = "umap", group.by = "SpaNorm_snn_res.1",
                   label = TRUE, label.size = 3, repel = TRUE,
                   cols = as.vector(polychrome()), raster = FALSE) +
             ggtitle(sprintf("%s — SpaNorm clusters (n=%d)", i,
-                            nlevels(factor(srt$seurat_clusters)))) +
+                            nlevels(factor(srt$SpaNorm_snn_res.1)))) +
             theme(legend.position = "none")
 p_mg   <- DimPlot(srt, reduction = "umap", group.by = "module_anno",
                   cols = mg_pal, raster = FALSE) +
@@ -337,7 +361,12 @@ ggsave(file.path(spanorm_dir, "1_DimPlot_combined.png"),
        (p_ct | p_comp | p_cl) / (p_mg | p_fa | p_sub),
        width = 27, height = 14, dpi = 150)
 
-
+ggsave(file.path(spanorm_dir, "2_cluster_DimPlot_ImageDimPlot.png"),
+       p_cl | (ImageDimPlot(srt, group.by = "SpaNorm_snn_res.1", cols = "polychrome",
+                            border.color = "#00000000", size = 0.3) +
+                 ggtitle(sprintf("%s — SpaNorm clusters (n=%d)", i,
+                                 nlevels(factor(srt$SpaNorm_snn_res.1))))),
+       width = 18, height = 7, dpi = 150)
 
 fp_save(srt, arch_mod_cols,  "umap", file.path(spanorm_dir, "FeaturePlot_archetype_modules.png"))
 fp_save(srt, mod_score_cols, "umap", file.path(spanorm_dir, "FeaturePlot_G123_scores.png"), ncol = 3)
@@ -382,21 +411,23 @@ ggsave(file.path(pearson_dir, "1_DimPlot_combined.png"),
        (pp_ct | pp_comp | pp_cl) / (pp_mg | pp_fa | pp_sub),
        width = 27, height = 14, dpi = 150)
 
-ggsave(file.path(pearson_dir, "6_FeaturePlot_tumour_markers.png"),
-       FeaturePlot(srt, reduction = "pearsonumap", features = tumour_markers,
-                   ncol = 3, order = TRUE),
-       width = 12, height = 12, dpi = 150)
+ggsave(file.path(pearson_dir, "2_cluster_DimPlot_ImageDimPlot.png"),
+       pp_cl | (ImageDimPlot(srt, group.by = "pearson_clusters", cols = "polychrome",
+                             border.color = "#00000000", size = 0.3) +
+                  ggtitle(sprintf("%s — Pearson clusters (n=%d)", i,
+                                  nlevels(factor(srt$pearson_clusters))))),
+       width = 18, height = 7, dpi = 150)
 
-fp_save(srt, arch_mod_cols,  "pearsonumap", file.path(pearson_dir, "7_FeaturePlot_archetype_modules.png"))
-fp_save(srt, mod_score_cols, "pearsonumap", file.path(pearson_dir, "8_FeaturePlot_G123_scores.png"), ncol = 3)
-fp_save(srt, tn_cols,        "pearsonumap", file.path(pearson_dir, "9_FeaturePlot_tumour_normal_scores.png"), ncol = 2)
+fp_save(srt, arch_mod_cols,  "pearsonumap", file.path(pearson_dir, "FeaturePlot_archetype_modules.png"))
+fp_save(srt, mod_score_cols, "pearsonumap", file.path(pearson_dir, "FeaturePlot_G123_scores.png"), ncol = 3)
+fp_save(srt, tn_cols,        "pearsonumap", file.path(pearson_dir, "FeaturePlot_tumour_normal_scores.png"), ncol = 2)
 
 if (length(gs23_cols) > 0)
   fp_save(srt, gs23_cols, "pearsonumap",
-          file.path(pearson_dir, "10_FeaturePlot_genesets2023.png"), ncol = 4)
+          file.path(pearson_dir, "FeaturePlot_genesets2023.png"), ncol = 4)
 
 # Gavish meta-program FeaturePlots across all three reductions (saves to pearson_dir)
-srt <- score_meta_programs(srt, meta_programs, meta_cols = meta_cols,
+score_meta_programs(srt, meta_programs, meta_cols = meta_cols,
                             out_dir = pearson_dir,
                             reductions = c( "pearsonumap"))
 
@@ -429,37 +460,43 @@ ggsave(file.path(banksy_dir, "1_DimPlot_combined.png"),
        (pb_cl | pb_ct | pb_sub) / (pb_mg | pb_fa | plot_spacer()),
        width = 27, height = 14, dpi = 150)
 
-ggsave(file.path(banksy_dir, "5_FeaturePlot_tumour_markers.png"),
-       FeaturePlot(srt, reduction = "banksy0.2.umap", features = tumour_markers,
-                   ncol = 3, order = TRUE),
-       width = 12, height = 12, dpi = 150)
+ggsave(file.path(banksy_dir, "2_cluster_DimPlot_ImageDimPlot.png"),
+       pb_cl | (ImageDimPlot(srt, group.by = "banksy_clusters", cols = "polychrome",
+                             border.color = "#00000000", size = 0.3) +
+                  ggtitle(sprintf("%s — BANKSY clusters (n=%d)", i,
+                                  nlevels(factor(srt$banksy_clusters))))),
+       width = 18, height = 7, dpi = 150)
 
-fp_save(srt, arch_mod_cols,  "banksy0.2.umap", file.path(banksy_dir, "6_FeaturePlot_archetype_modules.png"))
-fp_save(srt, mod_score_cols, "banksy0.2.umap", file.path(banksy_dir, "7_FeaturePlot_G123_scores.png"), ncol = 3)
-fp_save(srt, tn_cols,        "banksy0.2.umap", file.path(banksy_dir, "8_FeaturePlot_tumour_normal_scores.png"), ncol = 2)
+fp_save(srt, arch_mod_cols,  "banksy0.2.umap", file.path(banksy_dir, "FeaturePlot_archetype_modules.png"))
+fp_save(srt, mod_score_cols, "banksy0.2.umap", file.path(banksy_dir, "FeaturePlot_G123_scores.png"), ncol = 3)
+fp_save(srt, tn_cols,        "banksy0.2.umap", file.path(banksy_dir, "FeaturePlot_tumour_normal_scores.png"), ncol = 2)
 
 if (length(gs23_cols) > 0)
   fp_save(srt, gs23_cols, "banksy0.2.umap",
-          file.path(banksy_dir, "9_FeaturePlot_genesets2023.png"), ncol = 4)
+          file.path(banksy_dir, "FeaturePlot_genesets2023.png"), ncol = 4)
 
-# Cluster × cell-type composition
-comp <- as.data.frame(table(cluster = srt$banksy_clusters, cell_type = srt$cell_type))
-p_count <- ggplot(comp, aes(cluster, Freq, fill = cell_type)) +
-  geom_col() +
-  scale_fill_manual(values = ct_pal, name = "Cell type") +
-  labs(title = paste(i, "— BANKSY cluster composition"),
-       x = "BANKSY cluster", y = "cells") +
-  theme_bw(base_size = 11)
-p_prop <- ggplot(comp, aes(cluster, Freq, fill = cell_type)) +
-  geom_col(position = "fill") +
-  scale_fill_manual(values = ct_pal, name = "Cell type") +
-  scale_y_continuous(labels = scales::percent) +
-  labs(x = "BANKSY cluster", y = "proportion") +
-  theme_bw(base_size = 11)
-ggsave(file.path(banksy_dir, "10_composition_barplot.png"),
-       p_count / p_prop, width = 12, height = 10, dpi = 150)
-write.csv(comp, file.path(banksy_dir, "banksy_cluster_celltype_composition.csv"),
-          row.names = FALSE)
+score_meta_programs(srt, meta_programs, meta_cols = meta_cols,
+                            out_dir = banksy_dir,
+                            reductions = c( "banksy0.2.umap"))
+                            
+# # Cluster × cell-type composition
+# comp <- as.data.frame(table(cluster = srt$banksy_clusters, cell_type = srt$cell_type))
+# p_count <- ggplot(comp, aes(cluster, Freq, fill = cell_type)) +
+#   geom_col() +
+#   scale_fill_manual(values = ct_pal, name = "Cell type") +
+#   labs(title = paste(i, "— BANKSY cluster composition"),
+#        x = "BANKSY cluster", y = "cells") +
+#   theme_bw(base_size = 11)
+# p_prop <- ggplot(comp, aes(cluster, Freq, fill = cell_type)) +
+#   geom_col(position = "fill") +
+#   scale_fill_manual(values = ct_pal, name = "Cell type") +
+#   scale_y_continuous(labels = scales::percent) +
+#   labs(x = "BANKSY cluster", y = "proportion") +
+#   theme_bw(base_size = 11)
+# ggsave(file.path(banksy_dir, "10_composition_barplot.png"),
+#        p_count / p_prop, width = 12, height = 10, dpi = 150)
+# write.csv(comp, file.path(banksy_dir, "banksy_cluster_celltype_composition.csv"),
+#           row.names = FALSE)
 
 plot_top_deg(srt, DEG %>% filter(p_val_adj < 0.05),
              out_dir = banksy_dir, prefix = "11_DEG")
@@ -467,62 +504,37 @@ plot_top_deg(srt, DEG %>% filter(p_val_adj < 0.05),
 # ── B4. Spatial — tissue-image space ──────────────────────────────────────────
 cat("Spatial plots...\n")
 
-ggsave(file.path(spatial_dir, "1_ImageDimPlot_cell_type.png"),
-       ImageDimPlot(srt, group.by = "cell_type", cols = ct_pal,
-                    border.color = "#00000000", size = 0.3),
-       width = 9, height = 7, dpi = 150)
+# All ImageDimPlots combined into one figure
+idp_specs <- list(
+  list(group = "cell_type",        cols = ct_pal,         title = "cell type"),
+  list(group = "compartment",      cols = NULL,           title = "compartment"),
+  list(group = "banksy_clusters",  cols = "polychrome",   title = "BANKSY clusters"),
+  list(group = "module_anno",      cols = mg_pal,         title = "module group"),
+  list(group = "final_annotation", cols = final_anno_pal, title = "final annotation"),
+  list(group = "subclone",         cols = c("1" = "red", "2" = "gold", "Normal" = "grey"),   title = "subclone")
+)
+idp_plots <- lapply(idp_specs, function(s) {
+  args <- list(srt, group.by = s$group, border.color = "#00000000", size = 0.3)
+  if (!is.null(s$cols)) args$cols <- s$cols
+  do.call(ImageDimPlot, args) + ggtitle(paste(i, "—", s$title))
+})
+ggsave(file.path(spatial_dir, "1_ImageDimPlot_combined.png"),
+       patchwork::wrap_plots(idp_plots, ncol = 3),
+       width = 24, height = 14, dpi = 300, limitsize = FALSE)
 
-ggsave(file.path(spatial_dir, "2_ImageDimPlot_compartment.png"),
-       ImageDimPlot(srt, group.by = "compartment",
-                    border.color = "#00000000", size = 0.3),
-       width = 9, height = 7, dpi = 150)
-
-ggsave(file.path(spatial_dir, "3_ImageDimPlot_banksy_clusters.png"),
-       ImageDimPlot(srt, group.by = "banksy_clusters", cols = "polychrome",
-                    border.color = "#00000000", size = 0.3),
-       width = 9, height = 7, dpi = 150)
-
-ggsave(file.path(spatial_dir, "4_ImageDimPlot_module_anno.png"),
-       ImageDimPlot(srt, group.by = "module_anno", cols = mg_pal,
-                    border.color = "#00000000", size = 0.3),
-       width = 9, height = 7, dpi = 150)
-
-ggsave(file.path(spatial_dir, "5_ImageDimPlot_final_annotation.png"),
-       ImageDimPlot(srt, group.by = "final_annotation", cols = final_anno_pal,
-                    border.color = "#00000000", size = 0.3),
-       width = 9, height = 7, dpi = 150)
-
-ggsave(file.path(spatial_dir, "6_ImageFeaturePlot_tumour_markers.png"),
-       ImageFeaturePlot(srt, features = tumour_markers, cols = c("white", "red")),
-       width = 15, height = 12, dpi = 150)
-
-ggsave(file.path(spatial_dir, "7_ImageFeaturePlot_archetype_modules.png"),
-       ImageFeaturePlot(srt, features = arch_mod_cols),
-       width = 15, height = 10, dpi = 150)
-
-ggsave(file.path(spatial_dir, "8_ImageFeaturePlot_G123_scores.png"),
-       ImageFeaturePlot(srt, features = mod_score_cols),
-       width = 12, height = 5, dpi = 150)
-
-ggsave(file.path(spatial_dir, "9_ImageFeaturePlot_tumour_normal_scores.png"),
-       ImageFeaturePlot(srt, features = tn_cols),
-       width = 10, height = 5, dpi = 150)
-
-if (length(gs23_cols) > 0) {
-  gs23_ncol <- min(4L, length(gs23_cols))
-  gs23_nrow <- ceiling(length(gs23_cols) / gs23_ncol)
-  ggsave(file.path(spatial_dir, "10_ImageFeaturePlot_genesets2023.png"),
-         ImageFeaturePlot(srt, features = gs23_cols),
-         width = gs23_ncol * 4, height = gs23_nrow * 3,
-         dpi = 150, limitsize = FALSE)
-}
+# All ImageFeaturePlots combined into one figure — same signature sets as the
+# UMAP FeaturePlots (markers, archetype modules, G123, tumour/normal, genesets2023,
+# and the Gavish meta-programs).
+ifp_feats <- c(tumour_markers, arch_mod_cols, mod_score_cols,
+               tn_cols, gs23_cols, meta_cols)
+ifp_save(srt, ifp_feats, file.path(spatial_dir, "2_ImageFeaturePlot_combined.png"))
 
 # ── B5. Bar plots (grouping × cell_type and module_anno) ──────────────────────
 cat("Bar plots...\n")
 meta <- srt@meta.data
-
-grouping_vars <- c("seurat_clusters", "banksy_clusters", "pearson_clusters",
-                   "category", "subclone")
+saveRDS(meta, "tumour_normal_score_meta.Rds")
+grouping_vars <- c("SpaNorm_snn_res.1", "banksy_clusters", "pearson_clusters",
+                   "category", "subclone", "compartment")
 
 for (gvar in grouping_vars) {
   barplot_comp(meta, gvar, "cell_type",   ct_pal,

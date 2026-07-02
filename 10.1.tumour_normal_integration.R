@@ -51,8 +51,7 @@ paths  <- system("realpath ~/VisHD/LUT-245-*/tumour_normal_anno_srt.qs2", intern
 slides <- basename(dirname(paths))
 cat("\nLoading", length(paths), "per-sample tumour+normal objects\n")
 
-metaList <- list()
-minis <- lapply(seq_along(paths), function(k) {
+minisres <- lapply(seq_along(paths), function(k) {
   cat("  Loading", slides[k], "\n")
   srt_full <- qs_read(paths[k])
   counts <- GetAssayData(srt_full, assay = "Spatial", layer = "counts")
@@ -66,14 +65,20 @@ minis <- lapply(seq_along(paths), function(k) {
 
   # final_annotation: normal cell-types; NA on tumour cells (filled -> "Tumour" below)
   meta$final_annotation <- as.character(meta$final_annotation)
-  srt_mini <- CreateSeuratObject(counts = counts, meta.data = meta, assay = "Spatial")
+  srt_mini <- CreateSeuratObject(counts = counts,  assay = "Spatial")
   # Prefix barcodes with the slide so IDs are globally unique across samples.
   srt_mini <- RenameCells(srt_mini, add.cell.id = slides[k])
   cat("    ", slides[k], ":", ncol(srt_mini), "cells\n")
+  res <- list(srt = srt_mini, meta = meta)
   rm(srt_full); gc()
-  metaList[[k]] <- srt_mini@meta.data
-  srt_mini
+  return(res)
 })
+
+minis <- lapply(minisres, `[[`, "srt")
+metaList <- lapply(minisres, `[[`, "meta")
+metaList <- lapply(metaList, function(x) x[, colnames(metaList[[1]])])  # ensure same column order
+meta <- do.call(rbind, metaList)
+rownames(meta) <- paste(meta$slide, meta$cell, sep = "_")
 n_cells <- sum(vapply(minis, ncol, numeric(1)))
 cat("  total cells:", n_cells, "\n")
 
@@ -86,7 +91,7 @@ stopifnot(ncol(srt) == n_cells)
 
 # ── 3. Keep only the Spatial assay; clear stale reductions ────────────────────
 srt <- DietSeurat(srt, assays = "Spatial")
-
+srt <- AddMetaData(srt, meta)
 # ── 4. Batch-corrected Pearson PCA (by slide) + UMAP + clusters ───────────────
 srt <- do.pearson_pca(srt, batch_variable = "slide", assay = "Spatial",
                       resolution = RES)

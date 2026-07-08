@@ -19,12 +19,12 @@ source("~/VisHD/functions.R")
 samples  <- c("LUT-245-07", "LUT-245-09", "LUT-245-10", "LUT-245-11",
               "LUT-245-15", "LUT-245-16", "LUT-245-17", "LUT-245-20")
 base_dir <- "~/VisHD"
-outdir   <- file.path(base_dir, "5.3.expression_proportion")
+outdir   <- file.path(base_dir, "5.4.expression_proportion")
 png_dir  <- file.path(outdir, "png")
 dir.create(png_dir, showWarnings = FALSE, recursive = TRUE)
 
 # ── Gene set: AR + FOLH1 + all DEGs (padj<0.05, |lfc|>1.25) from 5.2 ─────────
-deg_path <- file.path(base_dir, "5.2.DESeq2_results", "deseq2_res_DT_vs_CB.Rds")
+deg_path <- file.path(base_dir, "5.3.DESeq2_results", "deseq2_res_DT_vs_CB.Rds")
 top_degs <- character(0)
 if (file.exists(deg_path)) {
   res_df <- readRDS(deg_path) %>% filter(!is.na(pvalue))
@@ -35,7 +35,11 @@ if (file.exists(deg_path)) {
 } else {
   message("DEG file not found - proceeding with AR + FOLH1 only.")
 }
-genes <- unique(c("AR", "FOLH1", top_degs))
+# Curated marker panels for individual per-gene comparison (SLC18A1 = VMAT1)
+ar_genes <- c("AR", "FOLH1", "KLK3", "NKX3-1", "TMPRSS2", "KLK4", "STEAP2", "STEAP1")
+ne_genes <- c("CHGA", "CHGB", "SCG2", "SLC18A1", "SYNGR4", "NPB", "PTPN5")
+
+genes <- unique(c("AR", "FOLH1", top_degs, ar_genes, ne_genes))
 cat("Testing", length(genes), "genes total\n")
 
 # ── Per-sample proportion calculation ─────────────────────────────────────────
@@ -89,44 +93,63 @@ wilcox_df <- prop_df %>%
   mutate(p_lab = ifelse(is.na(p), "p = NA", sprintf("p = %.3g", p)))
 write.csv(wilcox_df, file.path(outdir, "wilcoxon_DT_vs_CB.csv"), row.names = FALSE)
 
-# ── Bar plot - per-sample positive proportion ─────────────────────────────────
-n_genes <- length(unique(prop_df$gene))
-n_col   <- min(4, n_genes)
-n_row   <- ceiling(n_genes / n_col)
+# ── Plots: AR + FOLH1 and other DEGs plotted in separate figures ─────────────
+# Bar plot (per-sample positive proportion) + box plot (DT vs CB, paired
+# Wilcoxon p) for a subset of genes, saved with a group tag in the filename.
+make_prop_plots <- function(df, wilcox_df, tag, plots = c("bar", "box")) {
+  n_genes <- length(unique(df$gene))
+  if (n_genes == 0) { message("No genes for ", tag, " - skipping plots"); return(invisible(NULL)) }
+  n_col <- min(4, n_genes)
+  n_row <- ceiling(n_genes / n_col)
 
-p_bar <- ggplot(prop_df, aes(sample, prop, fill = category)) +
-  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
-  facet_wrap(~ gene, scales = "free_y", ncol = n_col) +
-  scale_fill_manual(values = c(CB = "steelblue", DT = "firebrick")) +
-  labs(title = "Positive expression proportion - DT vs CB (per sample)",
-       x = NULL, y = "Positive proportion") +
-  theme_classic() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
-        strip.text  = element_text(size = 9, face = "bold"))
+  if ("bar" %in% plots) {
+    p_bar <- ggplot(df, aes(sample, prop, fill = category)) +
+      geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+      facet_wrap(~ gene, scales = "free_y", ncol = n_col) +
+      scale_fill_manual(values = c(CB = "steelblue", DT = "firebrick")) +
+      labs(title = paste0("Positive expression proportion - DT vs CB (", tag, ")"),
+           x = NULL, y = "Positive proportion") +
+      theme_classic() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+            strip.text  = element_text(size = 9, face = "bold"))
+    ggsave(file.path(png_dir, paste0("1_barplot_positive_proportion_", tag, ".png")),
+           p_bar, width = n_col * 3.5, height = n_row * 2.5, dpi = 200, limitsize = FALSE)
+  }
 
-ggsave(file.path(png_dir, "1_barplot_positive_proportion.png"), p_bar,
-       width = n_col * 3.5, height = n_row * 2.5, dpi = 200, limitsize = FALSE)
+  if ("box" %in% plots) {
+    ann_y  <- df %>% group_by(gene) %>%
+      summarise(y = max(prop, na.rm = TRUE) * 1.08, .groups = "drop")
+    ann_df <- left_join(filter(wilcox_df, gene %in% unique(df$gene)), ann_y, by = "gene")
+    p_box <- ggplot(df, aes(category, prop, fill = category)) +
+      geom_boxplot(alpha = 0.6, outlier.shape = NA) +
+      geom_jitter(width = 0.15, size = 1.2, alpha = 0.8) +
+      geom_text(data = ann_df, aes(x = 1.5, y = y, label = p_lab),
+                inherit.aes = FALSE, size = 2.8) +
+      facet_wrap(~ gene, scales = "free_y", ncol = n_col) +
+      scale_fill_manual(values = c(CB = "steelblue", DT = "firebrick")) +
+      labs(title = paste0("DT vs CB positive expression proportion - paired Wilcoxon (", tag, ")"),
+           x = NULL, y = "Positive proportion") +
+      theme_classic() +
+      theme(legend.position = "none",
+            strip.text = element_text(size = 9, face = "bold"))
+    ggsave(file.path(png_dir, paste0("2_boxplot_DT_vs_CB_", tag, ".png")),
+           p_box, width = n_col * 2.8, height = n_row * 2.8, dpi = 200, limitsize = FALSE)
+  }
+}
 
-# ── Box plot - DT vs CB across samples per gene with paired Wilcoxon p ───────
-ann_y <- prop_df %>% group_by(gene) %>%
-  summarise(y = max(prop, na.rm = TRUE) * 1.08, .groups = "drop")
-ann_df <- left_join(wilcox_df, ann_y, by = "gene")
+key_genes <- c("AR", "FOLH1")
+make_prop_plots(filter(prop_df,  gene %in% key_genes), wilcox_df, "AR_FOLH1")
+make_prop_plots(filter(prop_df, !gene %in% key_genes), wilcox_df, "DEGs")
 
-p_box <- ggplot(prop_df, aes(category, prop, fill = category)) +
-  geom_boxplot(alpha = 0.6, outlier.shape = NA) +
-  geom_jitter(width = 0.15, size = 1.2, alpha = 0.8) +
-  geom_text(data = ann_df, aes(x = 1.5, y = y, label = p_lab),
-            inherit.aes = FALSE, size = 2.8) +
-  facet_wrap(~ gene, scales = "free_y", ncol = n_col) +
-  scale_fill_manual(values = c(CB = "steelblue", DT = "firebrick")) +
-  labs(title = "DT vs CB positive expression proportion (paired Wilcoxon)",
-       x = NULL, y = "Positive proportion") +
-  theme_classic() +
-  theme(legend.position = "none",
-        strip.text = element_text(size = 9, face = "bold"))
-
-ggsave(file.path(png_dir, "2_boxplot_DT_vs_CB.png"), p_box,
-       width = n_col * 2.8, height = n_row * 2.8, dpi = 200, limitsize = FALSE)
+# ── Individual per-gene comparison for the AR and NE marker panels ────────────
+# Box-only (DT vs CB), one figure per panel, facets ordered as the panel is listed.
+plot_panel <- function(panel, tag) {
+  df <- prop_df %>% filter(gene %in% panel) %>%
+    mutate(gene = factor(gene, levels = intersect(panel, unique(as.character(gene)))))
+  make_prop_plots(df, wilcox_df, tag, plots = "box")
+}
+plot_panel(ar_genes, "AR_genes")
+plot_panel(ne_genes, "NE_genes")
 
 # ── Genes with significant Wilcoxon (p < 0.05) ───────────────────────────────
 sig_wilcox <- wilcox_df %>% filter(!is.na(p), p < 0.05) %>% arrange(p)

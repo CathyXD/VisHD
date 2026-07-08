@@ -9,7 +9,7 @@ source("~/VisHD/functions.R")
 # 500 MiB cap is too small for the integrated object.
 options(future.globals.maxSize = 8 * 1024^3)  # 8 GiB
 
-in_dir  <- path.expand("~/VisHD/1.integrate_raw_cell")
+in_dir  <- path.expand("~/VisHD/1.1.integrate_raw_cell")
 full_path <- file.path(in_dir, "integrated_pearson_srt.qs2")
 setwd(in_dir)
 cat("Loading full integrated srt:", full_path, "\n")

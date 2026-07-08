@@ -7,7 +7,7 @@ library(qs, lib.loc = "~/R_Library/4.5")
 library(infercnv)
 source("~/VisHD/functions.R")
 
-in_dir    <- path.expand("~/VisHD/4.5.integrate_tumour_anno")
+in_dir    <- path.expand("~/VisHD/4.4.integrate_tumour_anno")
 full_path <- file.path(in_dir, "integrated_pearson_srt.qs2")
 out_dir   <- file.path(in_dir, "infercnv_clustered_tumour_anno")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)

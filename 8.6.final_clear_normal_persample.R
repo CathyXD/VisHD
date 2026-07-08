@@ -20,7 +20,7 @@ suppressPackageStartupMessages({
 source("~/VisHD/functions.R")   # do.spanorm(), do.pearson_pca()
 options(future.globals.maxSize = 8 * 1024^3)
 
-anno_csv <- path.expand("~/VisHD/9.4.1.final_clear_normal_integration/final_annotation.csv")
+anno_csv <- path.expand("~/VisHD/8.4.final_clear_normal_integration/final_annotation.csv")
 
 # ── DimPlot palette helper (removed/unknown in grey) ──────────────────────────
 final_palette <- function(v, grey_level = "Removed") {

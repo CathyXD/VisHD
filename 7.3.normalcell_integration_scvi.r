@@ -12,7 +12,7 @@ library(pals)
 # ── Paths ──────────────────────────────────────────────────────────────────
 paths   <- system("realpath ~/VisHD/LUT-245-*/normal/normal_srt.qs2", intern = TRUE)
 slides  <- basename(gsub("/normal", "", dirname(paths)))
-out_dir <- path.expand("~/VisHD/8.2.normal_cell_integration_scvi")
+out_dir <- path.expand("~/VisHD/7.3.normal_cell_integration_scvi")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 scvi_path <- file.path(out_dir, "integrated_scvi_srt.qs2")
 

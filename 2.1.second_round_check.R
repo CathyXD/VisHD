@@ -30,7 +30,7 @@ if (file.exists(anno_path)) {
   # ── 1. Tumour/Normal cell ids for this sample from the integrated objects ──
   # Integrated colnames are "<slide>_<barcode>"; strip the slide prefix to
   # recover the plain integer barcode used in the per-sample raw object.
-  int_dir <- path.expand("~/VisHD/1.integrate_raw_cell")
+  int_dir <- path.expand("~/VisHD/1.1.integrate_raw_cell")
 
   tumour_int <- qs_read(file.path(int_dir, "tumour_srt.qs2"))
   tumour_ids <- as.integer(gsub(paste0("^", sample, "_"), "",

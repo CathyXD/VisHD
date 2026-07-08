@@ -13,8 +13,8 @@ library(qs, lib.loc = "~/R_Library/4.5")
 library(infercnv)
 source("~/VisHD/functions.R")
 
-in_path <- path.expand("~/VisHD/10.0.tumour_normal_integration/integrated_pearson_srt.qs2")
-out_dir <- path.expand("~/VisHD/10.2.integrative_infercnv/infercnv_clustered_all")
+in_path <- path.expand("~/VisHD/9.4.tumour_normal_integration/integrated_pearson_srt.qs2")
+out_dir <- path.expand("~/VisHD/9.5.integrative_infercnv/infercnv_clustered_all")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
 cat("Loading 10.0 integrated srt:", in_path, "\n")

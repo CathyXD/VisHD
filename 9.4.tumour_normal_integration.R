@@ -26,7 +26,7 @@ options(future.globals.maxSize = 8 * 1024^3)
 RES <- 1.0   # clustering resolution on the batch-corrected Pearson graph
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-out_dir   <- path.expand("~/VisHD/10.0.tumour_normal_integration")
+out_dir   <- path.expand("~/VisHD/9.4.tumour_normal_integration")
 png_dir   <- file.path(out_dir, "png")
 integrated_file <- file.path(out_dir, "integrated_pearson_srt.qs2")
 dir.create(png_dir, showWarnings = FALSE, recursive = TRUE)
@@ -178,7 +178,7 @@ ggsave(file.path(png_dir, "9_spatial_all_samples.png"), p_all,
 # Resolve the single "Tumour" bucket into its per-cell signature label using the
 # 6.2.3 binarisation output (metas$Module_group), and score the three groupdeg
 # signatures on the integrated object. Normals collapse to a single "Normal".
-metas    <- readRDS("~/VisHD/6.2.3.signature_analysis/binarisation/metas.Rds")
+metas    <- readRDS("~/VisHD/6.4.signature_analysis/binarisation/metas.Rds")
 groupdeg <- readRDS(paste0("~/VisHD/6.2archetype_downstream_tumour/archetype_module/",
                            "group_DEG_enrichment/cross_sample_summary/groupdeg.rds"))
 

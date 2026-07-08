@@ -5,7 +5,7 @@
 #SBATCH --mem=150G
 #SBATCH --time=5:00:00
 #SBATCH --job-name=DEG_cluster_anno
-#SBATCH --output="slurmout/9.3.DEG_cluster_annotation-%j.out"
+#SBATCH --output="slurmout/8.2.DEG_cluster_annotation-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172

@@ -12,7 +12,7 @@ library(pals)
 # ── Paths ──────────────────────────────────────────────────────────────────
 paths   <- system("realpath ~/VisHD/LUT-245-*/normal/normal_srt.qs2", intern = TRUE)
 slides  <- basename(gsub("/normal", "", dirname(paths)))
-out_dir <- path.expand("~/VisHD/8.1.normal_cell_integration")
+out_dir <- path.expand("~/VisHD/7.1.normal_cell_integration")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 pearson_path <- file.path(out_dir, "integrated_pearson_srt2.qs2")
 
@@ -60,7 +60,7 @@ if (file.exists(pearson_path)) {
   srt <- JoinLayers(srt, assay = "Spatial", layers = c("counts"),
                      new.layer.names = c("counts"))
   DefaultAssay(srt) <- "Spatial"
-  removed_tumour_cells <- readRDS("~/VisHD/8.1.normal_cell_integration/removed_tumour_cells.Rds")
+  removed_tumour_cells <- readRDS("~/VisHD/7.1.normal_cell_integration/removed_tumour_cells.Rds")
   srt <- subset(srt, cells = setdiff(colnames(srt),removed_tumour_cells ))
   srt <- NormalizeData(srt, normalization.method = "LogNormalize", scale.factor = 1e4)
   srt <- FindVariableFeatures(srt, selection.method = "vst", nfeatures = 5000)

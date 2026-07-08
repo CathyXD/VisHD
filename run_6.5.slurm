@@ -14,7 +14,7 @@
 conda_env="partipy"
 source ${MYSOFTWARE}/miniconda3/bin/activate ${conda_env}
 
-outdir="${MYSCRATCH}/VisHD/6.3.integrate_tumour_archetype"
+outdir="${MYSCRATCH}/VisHD/6.5.integrate_tumour_archetype"
 mkdir -p "$outdir"
 
 jupyter nbconvert --to notebook --execute \

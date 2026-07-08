@@ -27,7 +27,7 @@ source("~/VisHD/functions.R")
 samples  <- c("LUT-245-07", "LUT-245-09", "LUT-245-10", "LUT-245-11",
               "LUT-245-15", "LUT-245-16", "LUT-245-17", "LUT-245-20")
 base_dir <- "~/VisHD"
-outdir     <- file.path(base_dir, "5.2.DESeq2_results")
+outdir     <- file.path(base_dir, "5.3.DESeq2_results")
 paired_dir <- file.path(outdir, "paired")   # existing paired DT-vs-CB + paired-subset cohort
 png_dir    <- file.path(paired_dir, "png")
 dir.create(png_dir, showWarnings = FALSE, recursive = TRUE)
@@ -307,6 +307,35 @@ if (nrow(sig_df) > 0) {
   cat("No significant DEGs — skipping enrichment\n")
 }
 
+# ── 6b. GSEA enrichment — all DEGs regardless of p-value ─────────────────────
+all_df <- res_df %>%
+  filter(!is.na(log2FoldChange)) %>%
+  arrange(desc(log2FoldChange))
+
+gene_list_all <- setNames(all_df$log2FoldChange, all_df$gene)
+
+enrich_list_all <- lapply(list(Hallmark = Hall, C6 = C6, C5 = C5,
+                                Archetype = Archetype,
+                                MetaProgMalignant = MetaProgM), function(gs) {
+  tryCatch(
+    clusterProfiler::GSEA(gene_list_all, TERM2GENE = gs, verbose = FALSE),
+    error   = function(e) NULL,
+    warning = function(w) NULL
+  )
+})
+saveRDS(enrich_list_all, file.path(paired_dir, "enrich_DT_vs_CB_allgenes.Rds"))
+
+for (nm in names(enrich_list_all)) {
+  res_e <- enrich_list_all[[nm]]
+  if (is.null(res_e) || nrow(res_e@result) == 0) next
+  sig_n <- sum(res_e@result$p.adjust < 0.05, na.rm = TRUE)
+  if (sig_n == 0) next
+  p_e <- pathwayenrich_plot(top_n = min(10, sig_n), gsea_result = res_e)
+  ggsave(file.path(png_dir, paste0("5b_GSEA_allDEGs_", nm, ".pdf")),
+         p_e, width = 6, height = 10)
+}
+cat("Enrichment (all DEGs, no p-value filter) done\n")
+
 # ── 7. Summary ────────────────────────────────────────────────────────────────
 summary_df <- data.frame(
   direction = c("DT > CB (lfc > 0.5)", "CB > DT (lfc < -0.5)"),
@@ -391,7 +420,7 @@ for (coll_nm in names(gsea_collections)) {
   rn <- gsub("_", " ", rn)
   rownames(nes_plot) <- rn
 
-  # Column annotation: sample_id + subclone
+  # Column annotation: sample_id + subclone -----------
   col_sample   <- sub("_sc.*", "", colnames(nes_plot))
   col_subclone <- sub(".*_sc", "sc", colnames(nes_plot))
   samp_lvls    <- unique(col_sample)
@@ -601,6 +630,33 @@ if (length(unique(pb_meta_dt$cohort)) < 2 || ncol(pb_counts_dt) < 4) {
   } else {
     cat("No significant cohort DEGs — skipping GSEA\n")
   }
+
+  # 9f. GSEA — all DEGs regardless of p-value
+  all_co_df <- res_co_df %>%
+    filter(!is.na(log2FoldChange)) %>%
+    arrange(desc(log2FoldChange))
+  gene_list_co_all <- setNames(all_co_df$log2FoldChange, all_co_df$gene)
+
+  enrich_co_all <- lapply(list(Hallmark = Hall, C6 = C6, C5 = C5,
+                                Archetype = Archetype,
+                                MetaProgMalignant = MetaProgM), function(gs) {
+    tryCatch(
+      clusterProfiler::GSEA(gene_list_co_all, TERM2GENE = gs, verbose = FALSE),
+      error = function(e) NULL, warning = function(w) NULL
+    )
+  })
+  saveRDS(enrich_co_all, file.path(paired_dir, "enrich_cohortB_vs_A_DT_allgenes.Rds"))
+
+  for (nm in names(enrich_co_all)) {
+    res_e <- enrich_co_all[[nm]]
+    if (is.null(res_e) || nrow(res_e@result) == 0) next
+    sig_n <- sum(res_e@result$p.adjust < 0.05, na.rm = TRUE)
+    if (sig_n == 0) next
+    p_e <- pathwayenrich_plot(top_n = min(10, sig_n), gsea_result = res_e)
+    ggsave(file.path(png_dir, paste0("11b_GSEA_allDEGs_cohortB_vs_A_DT_", nm, ".pdf")),
+           p_e, width = 6, height = 10)
+  }
+  cat("Cohort GSEA (all DEGs, no p-value filter) done\n")
 }
 
 # ── 10. Unpaired analyses ────────────────────────────────────────────────────
@@ -723,6 +779,23 @@ run_unpaired_block <- function(counts, meta, group_var, contrast,
              pathwayenrich_plot(top_n = min(10, sig_n), gsea_result = re),
              width = 6, height = 10)
     }
+  }
+
+  # GSEA across collections — all DEGs regardless of p-value
+  all_df <- res_df %>% filter(!is.na(log2FoldChange)) %>% arrange(desc(log2FoldChange))
+  gene_list_all <- setNames(all_df$log2FoldChange, all_df$gene)
+  enrich_list_all <- lapply(gsea_sets, function(gs)
+    tryCatch(clusterProfiler::GSEA(gene_list_all, TERM2GENE = gs, verbose = FALSE),
+             error = function(e) NULL, warning = function(w) NULL))
+  saveRDS(enrich_list_all, file.path(out_dir, "enrich_allgenes.Rds"))
+  for (nm in names(enrich_list_all)) {
+    re <- enrich_list_all[[nm]]
+    if (is.null(re) || nrow(re@result) == 0) next
+    sig_n <- sum(re@result$p.adjust < 0.05, na.rm = TRUE)
+    if (sig_n == 0) next
+    ggsave(file.path(pdir, paste0("5b_GSEA_allDEGs_", nm, ".pdf")),
+           pathwayenrich_plot(top_n = min(10, sig_n), gsea_result = re),
+           width = 6, height = 10)
   }
 
   # Summary

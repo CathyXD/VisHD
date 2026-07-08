@@ -36,7 +36,7 @@ LUT-245-*/**/*.ipynb
 
 # Executed notebook copies / result-dir notebooks are outputs, not source
 notebooks_executed/
-6.3.integrate_tumour_archetype/*.ipynb
+6.5.integrate_tumour_archetype/*.ipynb
 
 !.gitignore
 !CLAUDE.md

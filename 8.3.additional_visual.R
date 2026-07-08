@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # 8.3.additional_visual.R
-# Extra visualisations built from 9.3.DEG_cluster_annotation.R outputs.
+# Extra visualisations built from 8.2.DEG_cluster_annotation.R outputs.
 #
 #  (A) Per-cluster bar plots of cluster-DEG overlap with the meta-programs:
 #      one plot per cluster, every overlapping program ranked most -> least,
@@ -24,7 +24,7 @@ suppressPackageStartupMessages({
 })
 source("~/VisHD/normal_markers.R")   # provides `all_marker` (named list of signatures)
 
-out_dir        <- path.expand("~/VisHD/9.3.DEG_cluster_annotation")
+out_dir        <- path.expand("~/VisHD/8.2.DEG_cluster_annotation")
 percluster_dir <- file.path(out_dir, "png", "per_cluster")
 dir.create(percluster_dir, showWarnings = FALSE, recursive = TRUE)
 

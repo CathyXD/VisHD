@@ -1,5 +1,5 @@
 library(qs2); library(Seurat)
-srt <- qs_read(path.expand("~/VisHD/10.0.tumour_normal_integration/integrated_pearson_srt.qs2"))
+srt <- qs_read(path.expand("~/VisHD/9.4.tumour_normal_integration/integrated_pearson_srt.qs2"))
 m <- srt@meta.data
 cat("total cells:", nrow(m), "\n")
 m$na_coord <- is.na(m$x_centroid) | is.na(m$y_centroid)

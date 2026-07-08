@@ -67,6 +67,14 @@ ifp_save_genes <- function(srt, genes, outfile, assay = "SpaNorm",
 ar_genes <- c("AR", "FOLH1", "KLK3", "NKX3-1", "TMPRSS2", "KLK4", "STEAP2", "STEAP1")
 ne_genes <- c("CHGA", "CHGB", "SCG2", "SLC18A1", "SYNGR4", "NPB", "PTPN5")
 
+# Prostate epithelial lineage signatures (scored per cell with UCell)
+epi_markers <- list(
+  Basal   = c("TP63","KRT5","KRT14","KRT15","KRT6A","KRT17","NGFR",
+              "DST","BCAM","LGALS1","MMP7","SNAI2","COL17A1","LAMB3"),
+  Luminal = c("KRT8","KRT18","KRT19","AR","NKX3-1","KLK3","KLK2","ACP3",
+              "MSMB","TMPRSS2","FOLH1","SLC45A3","AZGP1","FOXA1","HOXB13","DPP4")
+)
+
 meta_xlsx     <- "~/VisHD/public_signature/meta_programs_2025-01-29.xlsx"
 sheetname     <- excel_sheets(meta_xlsx)
 
@@ -74,27 +82,43 @@ sheetname     <- excel_sheets(meta_xlsx)
 # character vector of gene symbols (from 6.3.archetype_module.r)
 groupgene <- readRDS("~/VisHD/6.2archetype_downstream_tumour/archetype_module/groupgene.Rds")
 
-# ── Heatmap: groupgene signature genes across tumour cells ────────────────────
-# Adapted from the recurrent-modules heatmap: rows = signature genes (split by
-# G1/G2/G3), columns = this sample's tumour cells (split by final_annotation),
-# matrix = per-gene z-scored SpaNorm expression.
-signature_heatmap <- function(srt, groupgene, outfile,
-                              annot_col = "final_annotation",
-                              assay = "SpaNorm", n_display = 40) {
+# ── groupgene signature expression, aggregated across all samples ────────────
+# Per sample: average SpaNorm expression per signature gene within each
+# final_annotation group (tumour cells only). aggregate_signature_heatmap()
+# then combines every sample's matrix into a single heatmap so the same group
+# (e.g. G1) can be compared side-by-side across samples.
+signature_group_avg <- function(srt, groupgene, annot_col = "final_annotation",
+                                assay = "SpaNorm") {
   if ("compartment" %in% colnames(srt@meta.data))
     srt <- srt[, srt$compartment == "Tumour"]
-  if (ncol(srt) < 10) return(invisible(NULL))
+  if (ncol(srt) < 10) return(NULL)
 
-  # genes per signature present in this object (cap by mean expression)
-  expr      <- GetAssayData(srt, assay = assay, layer = "data")
-  gene_list <- lapply(groupgene, function(g) {
-    g <- intersect(g, rownames(expr))
-    if (length(g) <= n_display) return(g)
-    avg <- rowMeans(as.matrix(expr[g, , drop = FALSE]))
-    names(sort(avg, decreasing = TRUE))[seq_len(n_display)]
-  })
-  gene_list <- gene_list[lengths(gene_list) > 0]
+  genes <- intersect(unique(unlist(groupgene, use.names = FALSE)), rownames(srt))
+  if (length(genes) == 0) return(NULL)
+
+  expr  <- as.matrix(GetAssayData(srt, assay = assay, layer = "data")[genes, , drop = FALSE])
+  group <- as.character(srt@meta.data[[annot_col]])
+  group[is.na(group)] <- "NA"
+
+  grp_idx <- split(seq_len(ncol(expr)), group)
+  vapply(grp_idx, function(idx) rowMeans(expr[, idx, drop = FALSE]), numeric(nrow(expr)))
+}
+
+aggregate_signature_heatmap <- function(avg_list, groupgene, outfile, n_display = 40) {
+  avg_list <- avg_list[!vapply(avg_list, is.null, logical(1))]
+  if (length(avg_list) == 0) return(invisible(NULL))
+
+  common_genes <- Reduce(intersect, lapply(avg_list, rownames))
+  gene_list    <- lapply(groupgene, function(g) intersect(g, common_genes))
+  gene_list    <- gene_list[lengths(gene_list) > 0]
   if (length(gene_list) == 0) return(invisible(NULL))
+
+  # cap each signature to its top n_display genes by expression pooled across samples
+  pooled_mean <- rowMeans(sapply(avg_list, function(m) rowMeans(m[common_genes, , drop = FALSE])))
+  gene_list <- lapply(gene_list, function(g) {
+    if (length(g) <= n_display) return(g)
+    g[order(pooled_mean[g], decreasing = TRUE)][seq_len(n_display)]
+  })
 
   all_genes    <- unique(unlist(gene_list, use.names = FALSE))
   gene_sig_map <- unlist(unname(mapply(
@@ -102,20 +126,28 @@ signature_heatmap <- function(srt, groupgene, outfile,
     gene_list, names(gene_list), SIMPLIFY = FALSE)))
   gene_sig_map <- gene_sig_map[!duplicated(names(gene_sig_map))][all_genes]
 
-  # per-gene z-scored expression, genes x cells
-  mat <- as.matrix(expr[all_genes, , drop = FALSE])
+  # one column per sample x group; z-score each gene across all such columns
+  mat_list <- lapply(names(avg_list), function(s) {
+    m <- avg_list[[s]][all_genes, , drop = FALSE]
+    colnames(m) <- paste0(s, "__", colnames(m))
+    m
+  })
+  mat <- do.call(cbind, mat_list)
   mat <- t(scale(t(mat)))
   mat[is.na(mat)] <- 0
 
-  col_split <- as.character(srt@meta.data[[annot_col]])
-  col_split[is.na(col_split)] <- "NA"
+  sample_split <- sub("__.*$", "", colnames(mat))
+  group_split  <- sub("^.*__", "", colnames(mat))
 
   sig_colors <- setNames(
     colorRampPalette(brewer.pal(9, "Set1"))(length(gene_list)),
     names(gene_list))
-  annot_lvls   <- sort(unique(col_split))
-  annot_colors <- setNames(
-    colorRampPalette(brewer.pal(8, "Set2"))(length(annot_lvls)), annot_lvls)
+  group_lvls   <- sort(unique(group_split))
+  group_colors <- setNames(
+    colorRampPalette(brewer.pal(8, "Set2"))(length(group_lvls)), group_lvls)
+  sample_lvls   <- sort(unique(sample_split))
+  sample_colors <- setNames(
+    colorRampPalette(brewer.pal(8, "Dark2"))(length(sample_lvls)), sample_lvls)
   col_z <- colorRamp2(c(-2, 0, 2), c("#2166AC", "white", "#B2182B"))
 
   gene_ha <- rowAnnotation(
@@ -123,11 +155,12 @@ signature_heatmap <- function(srt, groupgene, outfile,
     col       = list(Signature = sig_colors),
     show_annotation_name = FALSE)
   top_ha <- HeatmapAnnotation(
-    Group = col_split,
-    col   = list(Group = annot_colors),
+    Sample = sample_split,
+    Group  = group_split,
+    col    = list(Sample = sample_colors, Group = group_colors),
     show_annotation_name = TRUE)
 
-  png(outfile, width = 1600, height = 900, res = 150)
+  png(outfile, width = 1800, height = 900, res = 150)
   draw(Heatmap(
     mat,
     name              = "z-score",
@@ -137,13 +170,11 @@ signature_heatmap <- function(srt, groupgene, outfile,
     show_row_names    = TRUE,
     show_column_names = FALSE,
     row_names_gp      = gpar(fontsize = 7),
-    column_title      = "groupgene signature expression",
+    column_title      = "groupgene signature expression (avg per sample x group)",
     cluster_rows      = FALSE,
     cluster_columns   = FALSE,
     row_split         = gene_sig_map,
-    column_split      = col_split,
-    use_raster        = TRUE,
-    raster_quality    = 2))
+    column_split      = group_split))
   dev.off()
 }
 Imagescore_meta_programs <- function(obj, sheetname, meta_cols, out_dir,
@@ -181,15 +212,15 @@ Imagescore_meta_programs <- function(obj, sheetname, meta_cols, out_dir,
 }
 
 
+avg_expr_list <- list()
 for (arg in 1:8){
   path  <- paths[arg]
   i     <- basename(path)
   setwd(path)
   srt            <- qs_read("tumour_normal_anno_srt.qs2")
   spatial_dir  <- file.path(path, "final_png", "spatial")
-  heatmap_dir  <- file.path(path, "final_png", "heatmap")
-  dir.create(heatmap_dir, showWarnings = FALSE, recursive = TRUE)
   srt <- AddModuleScore_UCell(srt, features = list(heat.shock_mod), name = "_heat_shock_mod", slot = "data", assay = "SpaNorm")
+
 
   arch_mod_cols <- grep("_arch", colnames(srt@meta.data), value = TRUE)
   mod_score_cols<- grep("_gd", colnames(srt@meta.data), value = TRUE)
@@ -205,11 +236,13 @@ for (arg in 1:8){
   ifp_save(srt, feats = tn_cols, outfile = file.path(spatial_dir, "ImageFeaturePlot_tumour_normal_scores.png"))
   Imagescore_meta_programs(srt, sheetname = sheetname, meta_cols = meta_cols, out_dir = spatial_dir)
 
-  signature_heatmap(srt, groupgene,
-                    outfile = file.path(heatmap_dir, "groupgene_signature_heatmap.png"))
+  avg_expr_list[[i]] <- signature_group_avg(srt, groupgene)
 
   ifp_save_genes(srt, ar_genes, outfile = file.path(spatial_dir, "ImageFeaturePlot_AR_genes.png"))
   ifp_save_genes(srt, ne_genes, outfile = file.path(spatial_dir, "ImageFeaturePlot_NE_genes.png"))
+
+  ifp_save(srt, feats = paste0(names(epi_markers), "_epi"),
+           outfile = file.path(spatial_dir, "ImageFeaturePlot_epi_markers.png"))
 
   ggsave(file.path(spatial_dir, "ImageFeaturePlot_heat_shock_mod.png"),
          plot = ImageFeaturePlot(srt, features = "signature_1_heat_shock_mod") +
@@ -219,3 +252,28 @@ for (arg in 1:8){
                                  midpoint = 0.3),
          width = 8, height = 7, dpi = 300, limitsize = FALSE)
 }
+
+for (arg in 1:8){
+  path  <- paths[arg]
+  i     <- basename(path)
+  setwd(path)
+  srt            <- qs_read("tumour_normal_anno_srt.qs2")
+  spatial_dir  <- file.path(path, "final_png", "spatial")
+  heatmap_dir  <- file.path(path, "final_png", "heatmap")
+  dir.create(heatmap_dir, showWarnings = FALSE, recursive = TRUE)
+  srt <- AddModuleScore_UCell(srt, features = epi_markers, name = "_epi", slot = "data", assay = "SpaNorm")
+  avg_expr_list[[i]] <- signature_group_avg(srt, groupgene)
+
+  aggregate_signature_heatmap(avg_expr_list[i], groupgene,
+                              outfile = file.path(heatmap_dir, "groupgene_signature_heatmap.png"))
+
+   ifp_save(srt, feats = paste0(names(epi_markers), "_epi"),
+           outfile = file.path(spatial_dir, "ImageFeaturePlot_epi_markers.png"))
+  ifp_save_genes(srt, ar_genes, outfile = file.path(spatial_dir, "ImageFeaturePlot_AR_genes.png"))
+  ifp_save_genes(srt, ne_genes, outfile = file.path(spatial_dir, "ImageFeaturePlot_NE_genes.png"))
+}
+
+agg_heatmap_dir <- "~/VisHD/9.2.aggregate_heatmap"
+dir.create(agg_heatmap_dir, showWarnings = FALSE, recursive = TRUE)
+aggregate_signature_heatmap(avg_expr_list, groupgene,
+                            outfile = file.path(agg_heatmap_dir, "groupgene_signature_heatmap_aggregated.png"))

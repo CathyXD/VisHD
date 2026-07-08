@@ -133,10 +133,12 @@ endo_marker <- list(tip_like = c("SLC45A4", "CXCR4", "IGFBP3", "ESM1"),
                     liver_sinusoidal = c("ATRNL1", "OIT3", "FGF23", "DNASE1L3")) 
 
 # Epithelial --------------------------------------------------------------
-epi_marker <- list(basal = c("KRT5", "KRT15", "VAV3", "TP63", "TG"), 
-                   luminal = c("LMO7", "CLDN3", "ALDH1A3", "ALDH1A2"), 
-                   ciliated = c("ADCY2", "NR4A1", "PTPRN2"), 
-                   aveoliar = c("ITK", "DOCK2", "ABCA3", "SFTPB"))
+epi_marker <- list(basal = c("KRT5", "KRT15", "VAV3", "TP63", "TG"),
+                   luminal = c("LMO7", "CLDN3", "ALDH1A3", "ALDH1A2"),
+                   ciliated = c("ADCY2", "NR4A1", "PTPRN2"),
+                   aveoliar = c("ITK", "DOCK2", "ABCA3", "SFTPB"),
+                   seminal_vesicle = c("SEMG1", "SEMG2", "PATE4", "MUC6", "PGC",
+                                       "PAEP", "SERPINA5", "CYP4F8"))
 
 # T cell ------------------------------------------------------------------
 tcell_marker <- list(Treg = c("CTLA4" ,"IL2RA", "FOXP3", "RTKN2","IKZF2"), 

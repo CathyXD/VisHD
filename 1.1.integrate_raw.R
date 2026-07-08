@@ -12,7 +12,7 @@ source("~/VisHD/functions.R")  # filter_artefacts_knn
 # ── Paths ──────────────────────────────────────────────────────────────────
 paths   <- system("realpath ~/VisHD/LUT-245-*/raw_srt.qs", intern = TRUE)
 slides  <- basename(dirname(paths))
-out_dir <- path.expand("~/VisHD/1.integrate_raw_cell")
+out_dir <- path.expand("~/VisHD/1.1.integrate_raw_cell")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 pearson_path <- file.path(out_dir, "integrated_pearson_srt.qs2")
 

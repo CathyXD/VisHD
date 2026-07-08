@@ -1,11 +1,11 @@
 """SCimilarity cell-type annotation + cell search for the normal-cell integration.
 
-Reads ~/VisHD/8.1.normal_cell_integration/integrated_normal_cells2.h5ad and:
+Reads ~/VisHD/7.1.normal_cell_integration/integrated_normal_cells2.h5ad and:
   1. Runs Genentech's SCimilarity foundation model (CellAnnotation) against the
      prepackaged 23 M-cell reference, relabels low-confidence calls as "Unknown".
   2. Builds a SCimilarity embedding UMAP + Leiden clustering ("new embedding").
   3. Signature-based cell search (cell_search_tutorial_2): for each meta-program
-     signature (same gene sets FeaturePlotted in 9.2.scimilarity_check.R, plus
+     signature (same gene sets FeaturePlotted in 8.1.scimilarity_check.R, plus
      SVEC), scores cells, marks the top 5%, builds a centroid and finds which
      reference cell types it matches.
   4. Cluster-based cell type search (cell_search_tutorial_3): predicts each
@@ -40,7 +40,7 @@ from scimilarity.utils import align_dataset, lognorm_counts
 # Use $MYSCRATCH as the project root — works both natively on Pawsey and
 # under the singularity bind-mount that maps $MYSCRATCH to $HOME.
 ROOT      = Path(os.environ.get("MYSCRATCH", str(Path.home()))) / "VisHD"
-IN_H5AD   = ROOT / "8.1.normal_cell_integration/integrated_normal_cells2.h5ad"
+IN_H5AD   = ROOT / "7.1.normal_cell_integration/integrated_normal_cells2.h5ad"
 MODEL     = Path("/scratch/pawsey1172/sweng/VisHD/SCimilarity/model_v1.1")
 META_XLSX = ROOT / "public_signature/meta_programs_2025-01-29.xlsx"
 OUT       = ROOT / "9.normalcell_annotation"
@@ -107,7 +107,7 @@ adata.obs.loc[adata.obs["min_dist"] > DIST_THRESHOLD, "celltype_hint"] = "Unknow
 print(f"\ncelltype_hint counts (min_dist > {DIST_THRESHOLD} → Unknown):", flush=True)
 print(adata.obs["celltype_hint"].value_counts(), flush=True)
 
-# Per-cell hint CSV (read downstream by 9.2.scimilarity_check.R)
+# Per-cell hint CSV (read downstream by 8.1.scimilarity_check.R)
 out_csv = OUT / "celltype_hint_per_cell.csv"
 adata.obs[["celltype_hint", "celltype_hint_raw", "min_dist"]].to_csv(out_csv)
 print(f"Wrote {out_csv}", flush=True)

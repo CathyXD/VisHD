@@ -3,7 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=80G
-#SBATCH --time=03:00:00
+#SBATCH --time=3:00:00
 #SBATCH --job-name=signature_analysis
 #SBATCH --output="slurmout/6.4.signature_analysis-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org

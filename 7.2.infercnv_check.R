@@ -7,7 +7,7 @@ library(qs, lib.loc = "~/R_Library/4.5")
 library(infercnv)
 source("~/VisHD/functions.R")
 
-in_dir    <- path.expand("~/VisHD/8.1.normal_cell_integration")
+in_dir    <- path.expand("~/VisHD/7.1.normal_cell_integration")
 full_path <- file.path(in_dir, "integrated_pearson_srt2.qs2")
 out_dir   <- file.path(in_dir, "infercnv_check")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)

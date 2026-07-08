@@ -1,7 +1,7 @@
 library(qs2); library(Seurat)
 
 cat("######## NORMAL SOURCE: 9.4.1 normal_srt_final_anno.qs2 ########\n")
-n <- qs_read(path.expand("~/VisHD/9.4.1.final_clear_normal_integration/normal_srt_final_anno.qs2"))
+n <- qs_read(path.expand("~/VisHD/8.4.final_clear_normal_integration/normal_srt_final_anno.qs2"))
 nm <- n@meta.data
 cat("cells:", nrow(nm), "\n")
 cat("has x_centroid col:", "x_centroid" %in% colnames(nm), " y:", "y_centroid" %in% colnames(nm), "\n")

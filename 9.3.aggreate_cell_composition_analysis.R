@@ -8,8 +8,9 @@
 #   1. combined_tables/  all slides concatenated + within-(slide,group) proportion
 #   2. barplots/         composition (stacked proportion) faceted by slide; the
 #                        facet label shows that slide's total cell number
-#   3. heatmaps/         x = "<slide>-<group level>", y = fill category,
-#                        fill = proportion
+#   3. heatmaps/         ComplexHeatmap, x = "<slide>-<group level>", y = fill
+#                        category, fill = proportion, rows/cols hierarchically
+#                        clustered
 #   4. boxplots/         per-sample composition proportions, x = group level,
 #                        one panel per fill category, each point = a sample,
 #                        Wilcoxon between group levels (annotated on 2-level vars)
@@ -30,12 +31,14 @@ suppressPackageStartupMessages({
   library(ggplot2)
   library(scales)
   library(pals)
+  library(ComplexHeatmap)
+  library(circlize)
 })
 
 setwd("~/VisHD")
 set.seed(1)                                     # reproducible jitter
 
-out_dir <- "~/VisHD/10.0.1.aggregate_cell_composition"
+out_dir <- "~/VisHD/9.3.aggregate_cell_composition"
 tbl_dir <- file.path(out_dir, "combined_tables")
 bar_dir <- file.path(out_dir, "barplots")
 hm_dir  <- file.path(out_dir, "heatmaps")
@@ -113,7 +116,7 @@ cat("Slides:", paste(slides, collapse = ", "), "\n")
 
 bar_files <- unlist(lapply(paths, function(p)
   list.files(file.path(p, "final_png", "barplots"),
-             pattern = "^barplot_.*_by_(cell_type|module_anno)\\.csv$",
+             pattern = "^barplot_.*_by_(cell_type|module_anno|final_annotation)\\.csv$",
              full.names = TRUE)))
 if (length(bar_files) == 0) stop("No barplot_*_by_*.csv files found under final_png/barplots/")
 
@@ -202,18 +205,35 @@ for (combo in names(combos)) {
     mutate(xkey = paste(slide, group_level, sep = "-"))
   hd$xkey <- factor(hd$xkey, levels = unique(hd$xkey))
   nx <- nlevels(hd$xkey)
-  p_hm <- ggplot(hd, aes(xkey, fill_level, fill = prop)) +
-    geom_tile(colour = "grey90") +
-    scale_fill_viridis_c(labels = scales::percent, name = "proportion", limits = c(0, 1)) +
-    labs(title = sprintf("%s composition: %s (proportion within each slide x %s)",
-                         fill_var, group_var, group_var),
-         x = paste0("slide - ", group_var), y = fill_var) +
-    theme_bw(base_size = 8) +
-    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
-  ggsave(file.path(hm_dir, paste0(name, ".png")), p_hm,
-         width  = max(8, nx * 0.18 + 3),
-         height = max(5, n_f * 0.24 + 2),
-         dpi = 150, limitsize = FALSE)
+
+  mat <- matrix(NA_real_, nrow = n_f, ncol = nx,
+                dimnames = list(levels(df$fill_level), levels(hd$xkey)))
+  mat[cbind(as.character(hd$fill_level), as.character(hd$xkey))] <- hd$prop
+  mat_clust <- mat; mat_clust[is.na(mat_clust)] <- 0     # NA -> 0 for clustering only
+  row_dend  <- if (nrow(mat) > 1) hclust(dist(mat_clust))      else FALSE
+  col_dend  <- if (ncol(mat) > 1) hclust(dist(t(mat_clust)))   else FALSE
+
+  ht <- ComplexHeatmap::Heatmap(
+    mat,
+    name              = "proportion",
+    col               = circlize::colorRamp2(c(0, 0.5, 1), scales::viridis_pal()(3)),
+    na_col            = "grey80",
+    cluster_rows      = row_dend,
+    cluster_columns   = col_dend,
+    row_names_gp      = grid::gpar(fontsize = 8),
+    column_names_gp   = grid::gpar(fontsize = 7),
+    column_names_rot  = 90,
+    heatmap_legend_param = list(at = c(0, 0.25, 0.5, 0.75, 1),
+                                labels = scales::percent(c(0, 0.25, 0.5, 0.75, 1))),
+    column_title      = sprintf("%s composition: %s (proportion within each slide x %s)",
+                                fill_var, group_var, group_var)
+  )
+  png(file.path(hm_dir, paste0(name, ".png")),
+      width  = max(8, nx * 0.18 + 3),
+      height = max(5, n_f * 0.24 + 2),
+      units = "in", res = 150)
+  ComplexHeatmap::draw(ht)
+  dev.off()
 
   # 5-6. Boxplots (point = sample) + Wilcoxon between group levels per fill
   wx <- do.call(rbind, lapply(levels(df$fill_level), function(fl)

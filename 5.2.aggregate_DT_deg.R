@@ -19,7 +19,7 @@ suppressPackageStartupMessages({
 samples  <- c("LUT-245-07", "LUT-245-09", "LUT-245-10", "LUT-245-11",
               "LUT-245-15", "LUT-245-16", "LUT-245-17", "LUT-245-20")
 base_dir <- "~/VisHD"
-outdir   <- file.path(base_dir, "5.1.aggregate_results")
+outdir   <- file.path(base_dir, "5.2.aggregate_results")
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
 min_recur  <- 2    # must be significant in >= this many samples

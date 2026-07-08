@@ -5,7 +5,7 @@
 #SBATCH --mem=50G
 #SBATCH --time=1:00:00
 #SBATCH --job-name=agg_composition
-#SBATCH --output="slurmout/10.0.1.aggregate_cell_composition-%j.out"
+#SBATCH --output="slurmout/9.3.aggregate_cell_composition-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172

@@ -798,6 +798,89 @@ cellhighlight_imagedim <- function(srt, cond){
 }
 
 
+# Spatially map single/multi-gene expression on a dark background: point colour
+# AND point size both scale continuously with expression (white = low, firebrick
+# = high). Mimics ImageFeaturePlot()'s spatial-expression role via a custom
+# geom_point renderer so point size can be driven by expression too.
+dark_feature_plot <- function(srt, features, assay = "SpaNorm", layer = "data",
+                               image = NULL, order_high_on_top = TRUE,
+                               pt_size_range = c(0.05, 1.2),
+                               low_color = "#080144", high_color = "white",
+                               bg_color = "black", log1p_transform = FALSE,
+                               ncol = NULL, size_legend = FALSE,
+                               title_wrap_width = 10, base_title_size = 12,
+                               wrapped_title_size = 8) {
+  require(Seurat)
+  require(ggplot2)
+  require(patchwork)
+
+  # ── 1. Tissue coordinates, aligned to srt cell order by barcode ──────────
+  coords <- tryCatch(
+    Seurat::GetTissueCoordinates(srt, image = image, which = "centroids"),
+    error = function(e) {
+      if (all(c("x_centroid", "y_centroid") %in% colnames(srt@meta.data))) {
+        data.frame(cell = colnames(srt), x = srt$x_centroid, y = srt$y_centroid,
+                   stringsAsFactors = FALSE)
+      } else {
+        stop("dark_feature_plot: no FOV/image on `srt` and no x_centroid/",
+             "y_centroid meta.data columns to fall back on.")
+      }
+    }
+  )
+  id_col <- intersect(c("cell", "barcode", "id"), names(coords))
+  if (length(id_col) == 0)
+    stop("dark_feature_plot: coordinates table has no cell/barcode column.")
+  idx <- match(colnames(srt), coords[[id_col[1]]])
+  if (anyNA(idx))
+    stop(sprintf("dark_feature_plot: %d cells have no matching coordinate row.",
+                 sum(is.na(idx))))
+  coords <- coords[idx, ]
+
+  # ── 2. Expression ─────────────────────────────────────────────────────────
+  expr_mat <- GetAssayData(srt, assay = assay, layer = layer)
+  features <- features[features %in% rownames(expr_mat)]
+  if (length(features) == 0)
+    stop("dark_feature_plot: none of `features` found in assay '", assay, "'.")
+
+  dark_theme <- theme_void() +
+    theme(
+      plot.background   = element_rect(fill = bg_color, colour = bg_color),
+      panel.background  = element_rect(fill = bg_color, colour = bg_color),
+      legend.background = element_rect(fill = bg_color, colour = NA),
+      legend.key        = element_rect(fill = bg_color, colour = NA),
+      legend.text       = element_text(colour = "white"),
+      legend.title      = element_text(colour = "white"),
+      plot.title        = element_text(colour = "white", hjust = 0.5, face = "bold")
+    )
+
+  plots <- lapply(features, function(feat) {
+    v <- expr_mat[feat, ]
+    if (log1p_transform) v <- log1p(v)
+    df <- data.frame(x = coords$x, y = coords$y, expr = v)
+    if (order_high_on_top) df <- df[base::order(df$expr), ]  # high expr drawn last (on top)
+
+    wrapped   <- nchar(feat) > title_wrap_width
+    title_txt <- if (wrapped) paste(strwrap(feat, width = title_wrap_width), collapse = "\n") else feat
+    title_sz  <- if (wrapped) wrapped_title_size else base_title_size
+
+    ggplot(df, aes(x, y, colour = expr, size = expr)) +
+      geom_point(shape = 16) +
+      scale_colour_gradient(low = low_color, high = high_color, name = "Expression") +
+      scale_size_continuous(range = pt_size_range,
+                            guide = if (size_legend) "legend" else "none") +
+      scale_y_reverse() +
+      coord_fixed() +
+      dark_theme +
+      theme(plot.title = element_text(size = title_sz)) +
+      ggtitle(title_txt)
+  })
+  names(plots) <- features
+
+  patchwork::wrap_plots(plots, ncol = ncol) &
+    theme(plot.background = element_rect(fill = bg_color, colour = bg_color))
+}
+
+
 
 srt2anndata <- function(srt,
                         count_assay = "Spatial",

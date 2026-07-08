@@ -29,12 +29,20 @@ groupdeg <- readRDS(file.path(base_dir,
 module_names <- paste0("module_", names(groupdeg))
 banksy_col   <- "BANKSY_0.2_snn_res.1"            # only BANKSY clustering in tumour_srt.qs2
 
-outdir  <- file.path(base_dir, "6.2.3.signature_analysis")
-bin_dir <- file.path(outdir, "binarisation")
-box_dir <- file.path(outdir, "boxplots")
-sts_dir <- file.path(outdir, "stats")
-spt_dir <- file.path(outdir, "spatial")
-for (d in c(bin_dir, box_dir, sts_dir, spt_dir))
+# gene sets for Module_group DEG pathway enrichment (run_gsea_panel(), functions.R)
+Hall <- readRDS(file.path(base_dir, "Hall.Rds"))
+C6   <- readRDS(file.path(base_dir, "C6.Rds"))
+C5   <- readRDS(file.path(base_dir, "C5.Rds"))
+gene_sets <- list(Hallmark = Hall, C6 = C6, C5 = C5)
+
+outdir   <- file.path(base_dir, "6.4.signature_analysis")
+bin_dir  <- file.path(outdir, "binarisation")
+box_dir  <- file.path(outdir, "boxplots")
+sts_dir  <- file.path(outdir, "stats")
+spt_dir  <- file.path(outdir, "spatial")
+deg_dir  <- file.path(outdir, "module_group_deg")
+path_dir <- file.path(outdir, "pathway_enrichment")
+for (d in c(bin_dir, box_dir, sts_dir, spt_dir, deg_dir, path_dir))
   dir.create(d, showWarnings = FALSE, recursive = TRUE)
 
 pos_pal <- c(neg = "grey85", pos = "indianred")
@@ -109,6 +117,25 @@ for (s in samples) {
       ggtitle(sprintf("%s  %s+ (%d)", s, sub("_pos$", "", m), npos)) +
       theme(plot.title = element_text(size = 8), legend.position = "none")
   }
+
+  # ── DEG by Module_group + pathway enrichment on those DEGs ─────────────────
+  srt$Module_group <- droplevels(srt$Module_group)
+  if (dplyr::n_distinct(srt$Module_group) >= 2) {
+    Idents(srt) <- "Module_group"
+    DEG_mg <- tryCatch(
+      FindAllMarkers(srt, assay = score_assay, test.use = "MAST",
+                     only.pos = TRUE, verbose = FALSE),
+      error = function(e) { message("  FindAllMarkers failed for ", s, ": ",
+                                    conditionMessage(e)); NULL })
+    if (!is.null(DEG_mg) && nrow(DEG_mg) > 0) {
+      saveRDS(DEG_mg, file.path(deg_dir, sprintf("%s_deg_modulegroup.Rds", s)))
+      write.csv(DEG_mg, file.path(deg_dir, sprintf("%s_deg_modulegroup.csv", s)),
+                row.names = FALSE)
+      run_gsea_panel(DEG_mg, gene_sets,
+                     file.path(deg_dir, sprintf("%s_enrich_modulegroup.Rds", s)))
+    }
+  }
+
   rm(srt); gc()
 }
 
@@ -121,7 +148,10 @@ write.csv(metas, file.path(bin_dir, "metas.csv"), row.names = FALSE)
 saveRDS(metas, file.path(bin_dir, "metas.Rds"))
 
 # ── Long-format per-cell tables ───────────────────────────────────────────────
-metas_df        <- as.data.frame(metas)
+metas_df <- as.data.frame(metas)
+# collapse category to broad CB vs DT (drop CB 0/CB 1 sub-levels) for all category comparisons
+if ("category" %in% names(metas_df))
+  metas_df$category <- ifelse(grepl("^CB", metas_df$category), "CB", metas_df$category)
 present_modules <- intersect(module_names, names(metas_df))
 present_pos     <- intersect(paste0(present_modules, "_pos"), names(metas_df))
 present_modules <- sub("_pos$", "", present_pos)                  # keep score/pos paired
@@ -191,6 +221,30 @@ bar_bk  <- make_pos_bar(banksy_col, character(0), "Set3",
 
 write.csv(bind_rows(bar_cat, bar_sub, bar_bk),
           file.path(sts_dir, "positivity_proportions.csv"), row.names = FALSE)
+
+# ── Positivity boxplot by category: one point per sample, Wilcoxon significance
+make_pos_box <- function(d, title, file) {
+  d <- d %>% mutate(grp = droplevels(factor(grp)))
+  if (nrow(d) == 0 || dplyr::n_distinct(d$grp) < 2) return(invisible())
+  comparisons <- combn(levels(d$grp), 2, simplify = FALSE)
+  p <- ggplot(d, aes(grp, prop_pos)) +
+    geom_boxplot(outlier.shape = NA, fill = "grey92") +
+    geom_jitter(width = 0.12, height = 0, size = 1.5, alpha = 0.8) +
+    facet_wrap(~ module, scales = "free_y") +
+    stat_compare_means(comparisons = comparisons, method = "wilcox.test",
+                       label = "p.signif", size = 2.5) +
+    labs(x = "category", y = "proportion positive (per sample)", title = title) +
+    theme_bw(base_size = 9) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  ggsave(file, p, width = length(present_modules) * 2.5 + 1, height = 4.5,
+         dpi = 200, limitsize = FALSE)
+}
+make_pos_box(bar_cat, "Signature positivity by category (points = samples)",
+  file.path(box_dir, "boxplot_positivity_by_category.png"))
+make_pos_box(bar_sub, "Signature positivity by subclone (points = samples)",
+  file.path(box_dir, "boxplot_positivity_by_subclone.png"))
+make_pos_box(bar_bk, "Signature positivity by BANKSY_0.2 cluster (points = samples)",
+  file.path(box_dir, "boxplot_positivity_by_banksy.png"))
 
 # ── Module_group composition: proportion of each label per group, facet sample ─
 make_group_comp <- function(group_col, drop_vals, title, file) {
@@ -269,5 +323,47 @@ if (length(sp_group) > 0)
          wrap_plots(sp_group[samples[samples %in% names(sp_group)]], nrow = 2) &
            scale_fill_manual(values = group_pal, drop = FALSE),
          width = length(sp_group) * 3, height = 10, dpi = 150, limitsize = FALSE)
+
+# ── Aggregate Module_group pathway enrichment across samples ──────────────────
+# Recurrent = significant (p.adjust < 0.05) in >= min_recur samples for a given
+# (Module_group, geneset, pathway); top_n most-recurrent pathways per Module_group
+# are plotted as a bar chart.
+enrich_files <- list.files(deg_dir, pattern = "_enrich_modulegroup\\.Rds$", full.names = TRUE)
+if (length(enrich_files) > 0) {
+  enrich_long <- bind_rows(lapply(enrich_files, function(f) {
+    s  <- sub("_enrich_modulegroup\\.Rds$", "", basename(f))
+    el <- readRDS(f)
+    bind_rows(lapply(names(el), function(gs) bind_rows(lapply(names(el[[gs]]), function(m) {
+      res <- el[[gs]][[m]]
+      if (is.null(res) || nrow(res@result) == 0) return(NULL)
+      as.data.frame(res@result) %>% mutate(slide = s, geneset = gs, Module_group = m)
+    }))))
+  }))
+  write.csv(enrich_long, file.path(path_dir, "all_pathway_enrichment_long.csv"), row.names = FALSE)
+
+  min_recur <- 2   # a pathway must be significant in >=2 samples to count as "recurrent"
+  top_n     <- 10
+  recur <- enrich_long %>%
+    filter(p.adjust < 0.05) %>%
+    group_by(Module_group, geneset, ID) %>%
+    summarise(n_recur = dplyr::n_distinct(slide), mean_NES = mean(NES), .groups = "drop") %>%
+    filter(n_recur >= min_recur)
+  write.csv(recur, file.path(path_dir, "recurrent_pathways.csv"), row.names = FALSE)
+
+  for (m in unique(recur$Module_group)) {
+    d <- recur %>% filter(Module_group == m) %>%
+      arrange(desc(n_recur), desc(abs(mean_NES))) %>% slice_head(n = top_n) %>%
+      mutate(ID = factor(ID, levels = rev(ID)))
+    if (nrow(d) == 0) next
+    p <- ggplot(d, aes(ID, n_recur, fill = geneset)) +
+      geom_col() +
+      coord_flip() +
+      labs(x = NULL, y = sprintf("# samples significant (of %d)", length(samples)),
+           fill = "gene set", title = sprintf("Top recurrent enriched pathways — %s", m)) +
+      theme_bw(base_size = 9)
+    ggsave(file.path(path_dir, sprintf("top_pathways_%s.png", gsub("/", "-", m))), p,
+           width = 8, height = max(3, nrow(d) * 0.35 + 1), dpi = 150, limitsize = FALSE)
+  }
+}
 
 message("\nDone. 6.2.3 signature analysis written to ", outdir)

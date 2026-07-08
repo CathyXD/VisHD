@@ -6,9 +6,10 @@
 # SCimilarity hint, and on the 9.4.1 re-embedded object.
 #
 # Loads:
-#   9.4.1.final_clear_normal_integration/normal_srt_final_anno.qs2
-#   9.4.1.final_clear_normal_integration/final_annotation.csv   (cell_ID -> final_annotation)
+#   8.4.final_clear_normal_integration/normal_srt_final_anno.qs2
+#   8.4.final_clear_normal_integration/final_annotation.csv   (cell_ID -> final_annotation)
 # Writes (to 9.4.1 out_dir/final_annotation_analysis/):
+#   0_all_marker_dotplot.png            DotPlot of all_marker by final_annotation
 #   1_final_annotation_DimPlot.png      DimPlot on pearsonbatchumap
 #   2_composition_bar.png               per-slide x category composition
 #   3_final_annotation_boxplot.png      per-slide proportion of each annotation
@@ -16,6 +17,11 @@
 #   composition.csv
 #   meta_program_scores/<celltype>/<program>.png        (AddModuleScore)
 #   meta_program_scores/<celltype>_UCell/<program>.png  (UCell)
+#   ../normal_subtype_reclustering/<celltype>_recluster_srt.qs2  (cached per subtype)
+#   subtype_marker_scores/<celltype>_all_marker_scores.png       (all_marker on each subtype's own reclustering)
+# Writes (to ~/VisHD/8.5.normal_cell_subtypes/<celltype>/):
+#   <celltype>_deg_subcluster.{Rds,csv}       (MAST DE between pearson_clusters_batch subclusters)
+#   <celltype>_marker_dotplot.png             (DotPlot vs. the cell type's curated marker list)
 #
 # Skipped vs 9.2 (annotation is already final): TME annotation pipeline, the
 # DT-vs-CB paired Wilcoxon, and the annotated qs2 / AnnData re-export.
@@ -34,8 +40,10 @@ suppressPackageStartupMessages({
   library(qs2)
   library(UCell, lib.loc = "~/R_Library/4.5")
 })
+source("~/VisHD/functions.R")
+source("~/VisHD/normal_markers.R")
 
-out_dir <- path.expand("~/VisHD/9.4.1.final_clear_normal_integration")
+out_dir <- path.expand("~/VisHD/8.4.final_clear_normal_integration")
 in_srt  <- file.path(out_dir, "normal_srt_final_anno.qs2")
 in_csv  <- file.path(out_dir, "final_annotation.csv")
 viz_dir <- file.path(out_dir, "final_annotation_analysis")
@@ -55,6 +63,20 @@ srt$source_cluster   <- anno[srt$cell_ID, "source_cluster"]
 na_frac <- mean(is.na(srt$final_annotation))
 cat(sprintf("NA fraction after join: %.4f (%d / %d)\n",
             na_frac, sum(is.na(srt$final_annotation)), ncol(srt)))
+
+# ── 0. All-marker DotPlot across final_annotation ─────────────────────────────
+# Cells grouped by final_annotation; markers grouped by all_marker's own list
+# split (Hepatocyte, Neuron, Epithelial, ... — DotPlot facets by list name).
+feats_all <- lapply(all_marker, function(g) intersect(g, rownames(srt)))
+feats_all <- feats_all[lengths(feats_all) > 0]
+dp_all <- DotPlot(srt, features = feats_all, group.by = "final_annotation",
+                  assay = "Spatial") +
+  coord_flip() +
+  ggtitle("all_marker expression by final annotation") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave(file.path(viz_dir, "0_all_marker_dotplot.png"),
+       dp_all, width = 8, height = max(4, length(unlist(feats_all)) * 0.25 + 2),
+       dpi = 300, limitsize = FALSE)
 
 # ── 1. DimPlot of the final annotation on the batch-corrected UMAP ────────────
 dp <- DimPlot(srt, reduction = "pearsonbatchumap",
@@ -191,7 +213,121 @@ for (ct in names(meta_programs)) {
            fp, width = 6, height = 5, dpi = 300)
   }
 }
+# ── 5. Per-subtype reclustering + all-marker expression testing ──────────────
+# For each final_annotation cell type: subset, redo Pearson PCA (batch-
+# corrected by slide) + clustering, then score every all_marker signature
+# (not just the matching one) to check subcluster purity/contamination.
+# Cached per cell type — skips the recluster+score step once columns exist.
+subtype_dir <- file.path(out_dir, "normal_subtype_reclustering")
+dir.create(subtype_dir, showWarnings = FALSE, recursive = TRUE)
+marker_viz_dir <- file.path(viz_dir, "subtype_marker_scores")
+dir.create(marker_viz_dir, showWarnings = FALSE, recursive = TRUE)
 
+min_cells_subtype <- 50
+celltypes <- sort(unique(na.omit(srt$final_annotation)))
 
+for (ct in celltypes) {
+  ct_safe <- gsub("[^A-Za-z0-9]+", "_", ct)
+  ct_path <- file.path(subtype_dir, paste0(ct_safe, "_recluster_srt.qs2"))
 
-cat("\nDone. Outputs in", viz_dir, "\n")
+  if (file.exists(ct_path)) {
+    sub_srt <- qs_read(ct_path)
+  } else {
+    sub_srt <- subset(srt, subset = final_annotation == ct)
+  }
+
+  if (ncol(sub_srt) < min_cells_subtype) {
+    cat(sprintf("[%s] skipped — only %d cells (< %d)\n", ct, ncol(sub_srt), min_cells_subtype))
+    next
+  }
+
+  if (!all(names(all_marker) %in% colnames(sub_srt@meta.data))) {
+    cat(sprintf("[%s] reclustering %d cells...\n", ct, ncol(sub_srt)))
+    sub_srt <- do.pearson_pca(sub_srt, batch_variable = "slide", assay = "Spatial",
+                              find_hvgs = TRUE, resolution = 1)
+    sub_srt <- AddModuleScore(sub_srt, features = all_marker)
+    added <- paste0("Cluster", seq_along(all_marker))
+    colnames(sub_srt@meta.data)[match(added, colnames(sub_srt@meta.data))] <- names(all_marker)
+    qs_save(sub_srt, ct_path)
+  } else {
+    cat(sprintf("[%s] marker scores already present — skipping recluster\n", ct))
+  }
+
+  fp <- FeaturePlot(sub_srt, names(all_marker), reduction = "pearsonbatchumap",
+                    cols = c("white", "red"), order = TRUE) +
+    plot_layout(ncol = 4)
+  ggsave(file.path(marker_viz_dir, paste0(ct_safe, "_all_marker_scores.png")),
+         fp, width = 16, height = 12, dpi = 300, limitsize = FALSE)
+}
+
+# ── 6. Per-subtype MAST DE + curated marker DotPlot ───────────────────────────
+# Reuses the cached reclustering from Section 5 (already carries
+# `pearson_clusters_batch`), runs MAST DE between those subclusters, and draws
+# a DotPlot against the cell type's matching curated marker list (as opposed
+# to the flat `all_marker` purity check above).
+ct_marker_map <- list(
+  "B cells"       = bcell_marker,
+  "Plasma"        = bcell_marker,
+  "Macrophages"   = macro_marker,
+  "Epithelial"    = epi_marker,
+  "SVEC"          = epi_marker,        # Seminal Vesicle Epithelial Cell
+  "CAF"           = fibro_marker,
+  "Smooth muscle" = fibro_marker,
+  "Pericyte"      = endo_marker,
+  "Neurons"       = list(Neuron = Neuron_feature)
+)
+
+subtype_out_dir <- path.expand("~/VisHD/8.5.normal_cell_subtypes")
+dir.create(subtype_out_dir, showWarnings = FALSE, recursive = TRUE)
+
+for (ct in celltypes) {
+  ct_safe <- gsub("[^A-Za-z0-9]+", "_", ct)
+  ct_path <- file.path(subtype_dir, paste0(ct_safe, "_recluster_srt.qs2"))
+  if (!file.exists(ct_path)) {
+    cat(sprintf("[%s] skipped — no cached reclustering (too few cells)\n", ct))
+    next
+  }
+  markers <- ct_marker_map[[ct]]
+  if (is.null(markers)) {
+    cat(sprintf("[%s] skipped — no matching marker list\n", ct))
+    next
+  }
+
+  ct_dir <- file.path(subtype_out_dir, ct_safe)
+  dir.create(ct_dir, showWarnings = FALSE, recursive = TRUE)
+
+  sub_srt <- qs_read(ct_path)
+  Idents(sub_srt) <- "pearson_clusters_batch"
+  if (dplyr::n_distinct(Idents(sub_srt)) < 2) {
+    cat(sprintf("[%s] skipped — fewer than 2 subclusters\n", ct))
+    next
+  }
+
+  cat(sprintf("[%s] MAST DE between %d subclusters...\n", ct, dplyr::n_distinct(Idents(sub_srt))))
+  DE <- tryCatch(
+    FindAllMarkers(sub_srt, assay = "Spatial", test.use = "MAST",
+                   only.pos = TRUE, verbose = FALSE),
+    error = function(e) { message(sprintf("  FindAllMarkers failed for %s: %s", ct, conditionMessage(e))); NULL })
+  if (!is.null(DE) && nrow(DE) > 0) {
+    saveRDS(DE, file.path(ct_dir, sprintf("%s_deg_subcluster.Rds", ct_safe)))
+    write.csv(DE, file.path(ct_dir, sprintf("%s_deg_subcluster.csv", ct_safe)),
+              row.names = FALSE)
+  }
+
+  feats <- lapply(markers, function(g) intersect(g, rownames(sub_srt)))
+  feats <- feats[lengths(feats) > 0]
+  if (!length(feats)) {
+    cat(sprintf("[%s] no marker genes present — skipping DotPlot\n", ct))
+    next
+  }
+  dp <- DotPlot(sub_srt, features = feats, group.by = "pearson_clusters_batch",
+               assay = "Spatial") +
+    coord_flip() +
+    ggtitle(sprintf("%s — marker expression per subcluster", ct)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  ggsave(file.path(ct_dir, sprintf("%s_marker_dotplot.png", ct_safe)),
+         dp, width = 8, height = max(4, length(unlist(feats)) * 0.25 + 2),
+         dpi = 300, limitsize = FALSE)
+}
+
+cat("\nDone. Outputs in", viz_dir, "and", subtype_out_dir, "\n")

@@ -5,7 +5,7 @@
 #SBATCH --mem=150G
 #SBATCH --time=5:00:00
 #SBATCH --job-name=statial
-#SBATCH --output="slurmout/11.1.Statial-%j.out"
+#SBATCH --output="slurmout/10.1.Statial-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172

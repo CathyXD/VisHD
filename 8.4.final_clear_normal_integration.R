@@ -48,9 +48,9 @@ cluster_map <- c(
 )
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-in_srt    <- path.expand("~/VisHD/9.3.DEG_cluster_annotation/normal_srt_DEcluster.qs2")
+in_srt    <- path.expand("~/VisHD/8.2.DEG_cluster_annotation/normal_srt_DEcluster.qs2")
 meta_xlsx <- path.expand("~/VisHD/public_signature/meta_programs_2025-01-29.xlsx")
-out_dir   <- path.expand("~/VisHD/9.4.1.final_clear_normal_integration")
+out_dir   <- path.expand("~/VisHD/8.4.final_clear_normal_integration")
 png_dir   <- file.path(out_dir, "png")
 anno_csv  <- file.path(out_dir, "final_annotation.csv")
 dir.create(png_dir, showWarnings = FALSE, recursive = TRUE)

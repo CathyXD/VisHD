@@ -12,9 +12,9 @@ library(ggpubr)
 library(qs2)
 library(UCell, lib.loc = "~/R_Library/4.5")
 
-in_srt  <- path.expand("~/VisHD/8.1.normal_cell_integration/integrated_pearson_srt2.qs2")
+in_srt  <- path.expand("~/VisHD/7.1.normal_cell_integration/integrated_pearson_srt2.qs2")
 in_csv  <- path.expand("~/VisHD/9.normalcell_annotation/celltype_hint_per_cell.csv")
-out_dir <- path.expand("~/VisHD/9.2.scimilarity_check")
+out_dir <- path.expand("~/VisHD/8.1.scimilarity_check")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
 cat("Loading", in_srt, "\n")

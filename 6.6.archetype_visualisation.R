@@ -9,9 +9,9 @@
 #   2. DE genes            (top markers per archetype, z-score heatmap)
 #   3. Enrichment          (PROGENy pathway, category, pearson cluster)
 #
-# Input : ~/VisHD/4.5.integrate_tumour_anno/integrated_pearson_srt.qs2
-#         ~/VisHD/6.3.integrate_tumour_archetype/*.csv
-# Output: ~/VisHD/6.3.integrate_tumour_archetype/viz/
+# Input : ~/VisHD/4.4.integrate_tumour_anno/integrated_pearson_srt.qs2
+#         ~/VisHD/6.5.integrate_tumour_archetype/*.csv
+# Output: ~/VisHD/6.5.integrate_tumour_archetype/viz/
 
 suppressPackageStartupMessages({
   library(tidyverse)
@@ -26,8 +26,8 @@ suppressPackageStartupMessages({
 
 # ── Config ────────────────────────────────────────────────────────────────────
 base_dir <- "~/VisHD"
-res_dir  <- file.path(base_dir, "6.3.integrate_tumour_archetype")
-srt_path <- file.path(base_dir, "4.5.integrate_tumour_anno", "integrated_pearson_srt.qs2")
+res_dir  <- file.path(base_dir, "6.5.integrate_tumour_archetype")
+srt_path <- file.path(base_dir, "4.4.integrate_tumour_anno", "integrated_pearson_srt.qs2")
 outdir   <- file.path(res_dir, "viz")
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 

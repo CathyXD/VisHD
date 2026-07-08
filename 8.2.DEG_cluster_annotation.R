@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# 9.3.DEG_cluster_annotation.R
+# 8.2.DEG_cluster_annotation.R
 # Re-embed the annotated normal-cell object (9.2 output) with SCT-derived HVGs +
 # batch-corrected Pearson PCA (by slide), cluster at res 1.0, run MAST DE between
 # clusters, overlay the prior annotations on the NEW pearsonbatchumap, and
@@ -24,10 +24,10 @@ stopifnot(requireNamespace("glmGamPoi", quietly = TRUE)) # fast SCTransform
 options(future.globals.maxSize = 8 * 1024^3)  # 8 GiB; SCTransform future workers exceed the 500 MiB default
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-in_srt    <- path.expand("~/VisHD/9.2.scimilarity_check/normal_srt_annotated.qs2")
+in_srt    <- path.expand("~/VisHD/8.1.scimilarity_check/normal_srt_annotated.qs2")
 clu_csv   <- path.expand("~/VisHD/9.normalcell_annotation/cellsearch_cluster/cell_scimilarity_cluster_celltype.csv")
 meta_xlsx <- path.expand("~/VisHD/public_signature/meta_programs_2025-01-29.xlsx")
-out_dir   <- path.expand("~/VisHD/9.3.DEG_cluster_annotation")
+out_dir   <- path.expand("~/VisHD/8.2.DEG_cluster_annotation")
 png_dir   <- file.path(out_dir, "png")
 dir.create(png_dir, showWarnings = FALSE, recursive = TRUE)
 

@@ -54,7 +54,7 @@ meta_programs <- set_names(sheetname, sheetname) %>%
 meta_programs_unlist <- unlist(meta_programs, recursive = F)
 names(meta_programs_unlist) <- make.names(names(meta_programs_unlist), unique = T)
 
-metas    <- readRDS("~/VisHD/6.2.3.signature_analysis/binarisation/metas.Rds")
+metas    <- readRDS("~/VisHD/6.4.signature_analysis/binarisation/metas.Rds")
 groupdeg <- readRDS(paste0("~/VisHD/6.2archetype_downstream_tumour/archetype_module/",
                            "group_DEG_enrichment/cross_sample_summary/groupdeg.rds"))
 
@@ -534,6 +534,9 @@ ifp_save(srt, ifp_feats, file.path(spatial_dir, "2_ImageFeaturePlot_combined.png
 cat("Bar plots...\n")
 meta <- srt@meta.data
 saveRDS(meta, "tumour_normal_score_meta.Rds")
+# collapse category to broad CB vs DT (drop CB 0/CB 1 sub-levels) for the composition barplots
+if ("category" %in% names(meta))
+  meta$category <- ifelse(grepl("^CB", meta$category), "CB", meta$category)
 grouping_vars <- c("SpaNorm_snn_res.1", "banksy_clusters", "pearson_clusters",
                    "category", "subclone", "compartment")
 

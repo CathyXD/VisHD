@@ -18,7 +18,7 @@
 # Reference: https://bioconductor.org/packages/release/bioc/vignettes/Statial/
 #            inst/doc/Statial.html
 #
-# Outputs under ~/VisHD/11.1.Statial/:
+# Outputs under ~/VisHD/10.1.Statial/:
 #   kontextual/  Kontextual result table + tumour<->normal co-localization heatmaps
 #   spatiomark/  calcStateChanges result table + state-change heatmaps / plots
 #
@@ -51,7 +51,7 @@ maxDist <- 200          # SpatioMark: max distance considered by getDistances()
 # The Normal compartment is subdivided: Immune = these cell types, Stromal = the rest.
 immune_cell_types <- c("Macrophages", "B cells", "Plasma")
 
-out_dir  <- "~/VisHD/11.1.Statial"
+out_dir  <- "~/VisHD/10.1.Statial"
 kon_dir  <- file.path(out_dir, "kontextual")
 spm_dir  <- file.path(out_dir, "spatiomark")
 for (d in c(kon_dir, spm_dir)) dir.create(d, recursive = TRUE, showWarnings = FALSE)
@@ -313,4 +313,4 @@ tryCatch({
   }
 }, error = function(e) cat("SpatioMark plotting skipped:", conditionMessage(e), "\n"))
 
-cat("\n==================== 11.1.Statial done ====================\n")
+cat("\n==================== 10.1.Statial done ====================\n")

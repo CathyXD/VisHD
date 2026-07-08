@@ -21,43 +21,23 @@ source("~/VisHD/normal_markers.R")   # all_marker
 
 paths <- system("realpath ~/VisHD/LUT-245-*/", intern = TRUE)
 heat.shock_mod <- c("FOS", "FOSB", "JUN", "JUNB", "EGR1", "ATF3", "NR4A1", "DUSP1", "ZFP36", "HSPA1A","HSPA1B", "IER3","IER2", "BTG2", "SOCS3")
-ifp_save <- function(srt, feats, outfile, ncol = 3, dpi = 300) {
+ifp_save <- function(srt, feats, outfile, ncol = 3, dpi = 300, cells_highlight = NULL) {
   feats <- feats[feats %in% colnames(srt@meta.data)]
   if (length(feats) == 0) return(invisible(NULL))
   nrows <- ceiling(length(feats) / ncol)
-  plots <- lapply(feats, function(f) {
-    v   <- srt@meta.data[[f]]
-    mid <- (max(v, na.rm = TRUE) + min(v, na.rm = TRUE)) *0.3
-    ImageFeaturePlot(srt,  features = f, size = 0.3) +
-      scale_fill_gradient2(low = "steelblue", mid = "white", high = "indianred",
-                             midpoint = mid)+
-      scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
-                             midpoint = mid)
-  })
-  p <- patchwork::wrap_plots(plots, ncol = ncol)
+  p <- dark_feature_plot(srt, features = feats, ncol = ncol, cells_highlight = cells_highlight)
   ggsave(outfile, p,
          width = ncol * 8, height = nrows * 7,
          dpi = dpi, limitsize = FALSE)
 }
 # gene-expression version of ifp_save: features are pulled from an assay
-# (not meta.data). One figure per gene set, one ImageFeaturePlot panel per gene.
+# (not meta.data). One figure per gene set, one dark_feature_plot panel per gene.
 ifp_save_genes <- function(srt, genes, outfile, assay = "SpaNorm",
-                           ncol = 3, dpi = 300) {
-  DefaultAssay(srt) <- assay
-  genes <- genes[genes %in% rownames(srt)]
+                           ncol = 3, dpi = 300, cells_highlight = NULL) {
+  genes <- genes[genes %in% rownames(GetAssayData(srt, assay = assay, layer = "data"))]
   if (length(genes) == 0) return(invisible(NULL))
-  expr  <- GetAssayData(srt, assay = assay, layer = "data")
   nrows <- ceiling(length(genes) / ncol)
-  plots <- lapply(genes, function(g) {
-    v   <- expr[g, ]
-    mid <- (max(v, na.rm = TRUE) + min(v, na.rm = TRUE)) * 0.3
-    ImageFeaturePlot(srt, features = g, size = 0.3) +
-      scale_fill_gradient2(low = "steelblue", mid = "white", high = "indianred",
-                           midpoint = mid) +
-      scale_colour_gradient2(low = "steelblue", mid = "white", high = "indianred",
-                             midpoint = mid)
-  })
-  p <- patchwork::wrap_plots(plots, ncol = ncol)
+  p <- dark_feature_plot(srt, features = genes, assay = assay, ncol = ncol, cells_highlight = cells_highlight)
   ggsave(outfile, p,
          width = ncol * 8, height = nrows * 7,
          dpi = dpi, limitsize = FALSE)
@@ -220,7 +200,10 @@ for (arg in 1:8){
   srt            <- qs_read("tumour_normal_anno_srt.qs2")
   spatial_dir  <- file.path(path, "final_png", "spatial")
   srt <- AddModuleScore_UCell(srt, features = list(heat.shock_mod), name = "_heat_shock_mod", slot = "data", assay = "SpaNorm")
-
+  heatmap_dir  <- file.path(path, "final_png", "heatmap")
+  dir.create(heatmap_dir, showWarnings = FALSE, recursive = TRUE)
+  srt <- AddModuleScore_UCell(srt, features = epi_markers, name = "_epi", slot = "data", assay = "SpaNorm")
+  avg_expr_list[[i]] <- signature_group_avg(srt, groupgene)
 
   arch_mod_cols <- grep("_arch", colnames(srt@meta.data), value = TRUE)
   mod_score_cols<- grep("_gd", colnames(srt@meta.data), value = TRUE)
@@ -228,10 +211,10 @@ for (arg in 1:8){
   meta_cols <-  grep("_meta", colnames(srt@meta.data), value = TRUE)
   tn_cols <- c("tumour_score_UCell", "normal_score_UCell")
 
+  tumour_cells <- colnames(srt)[srt$compartment == "Tumour"]
 
-
-  ifp_save(srt, feats = arch_mod_cols, outfile = file.path(spatial_dir, "ImageFeaturePlot_archetype_modules.png"))
-  ifp_save(srt, feats = mod_score_cols, outfile = file.path(spatial_dir, "ImageFeaturePlot_G123_scores.png"))
+  ifp_save(srt, feats = arch_mod_cols, outfile = file.path(spatial_dir, "ImageFeaturePlot_archetype_modules.png"), cells_highlight = tumour_cells)
+  ifp_save(srt, feats = mod_score_cols, outfile = file.path(spatial_dir, "ImageFeaturePlot_G123_scores.png"), cells_highlight = tumour_cells)
   ifp_save(srt, feats = gs23_cols, outfile = file.path(spatial_dir, "ImageFeaturePlot_genesets2023.png"))
   ifp_save(srt, feats = tn_cols, outfile = file.path(spatial_dir, "ImageFeaturePlot_tumour_normal_scores.png"))
   Imagescore_meta_programs(srt, sheetname = sheetname, meta_cols = meta_cols, out_dir = spatial_dir)
@@ -251,18 +234,6 @@ for (arg in 1:8){
            scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred",
                                  midpoint = 0.3),
          width = 8, height = 7, dpi = 300, limitsize = FALSE)
-}
-
-for (arg in 1:8){
-  path  <- paths[arg]
-  i     <- basename(path)
-  setwd(path)
-  srt            <- qs_read("tumour_normal_anno_srt.qs2")
-  spatial_dir  <- file.path(path, "final_png", "spatial")
-  heatmap_dir  <- file.path(path, "final_png", "heatmap")
-  dir.create(heatmap_dir, showWarnings = FALSE, recursive = TRUE)
-  srt <- AddModuleScore_UCell(srt, features = epi_markers, name = "_epi", slot = "data", assay = "SpaNorm")
-  avg_expr_list[[i]] <- signature_group_avg(srt, groupgene)
 
   aggregate_signature_heatmap(avg_expr_list[i], groupgene,
                               outfile = file.path(heatmap_dir, "groupgene_signature_heatmap.png"))
@@ -272,6 +243,7 @@ for (arg in 1:8){
   ifp_save_genes(srt, ar_genes, outfile = file.path(spatial_dir, "ImageFeaturePlot_AR_genes.png"))
   ifp_save_genes(srt, ne_genes, outfile = file.path(spatial_dir, "ImageFeaturePlot_NE_genes.png"))
 }
+
 
 agg_heatmap_dir <- "~/VisHD/9.2.aggregate_heatmap"
 dir.create(agg_heatmap_dir, showWarnings = FALSE, recursive = TRUE)

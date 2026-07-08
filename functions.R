@@ -804,7 +804,8 @@ cellhighlight_imagedim <- function(srt, cond){
 # geom_point renderer so point size can be driven by expression too.
 dark_feature_plot <- function(srt, features, assay = "SpaNorm", layer = "data",
                                image = NULL, order_high_on_top = TRUE,
-                               pt_size_range = c(0.05, 1.2),
+                               cells_highlight = NULL,
+                               pt_size_range = c(0.01, 0.8),
                                low_color = "#080144", high_color = "white",
                                bg_color = "black", log1p_transform = FALSE,
                                ncol = NULL, size_legend = FALSE,
@@ -836,11 +837,18 @@ dark_feature_plot <- function(srt, features, assay = "SpaNorm", layer = "data",
                  sum(is.na(idx))))
   coords <- coords[idx, ]
 
-  # ── 2. Expression ─────────────────────────────────────────────────────────
+  # ── 2. Expression / meta.data values ──────────────────────────────────────
   expr_mat <- GetAssayData(srt, assay = assay, layer = layer)
-  features <- features[features %in% rownames(expr_mat)]
+  meta_cols <- colnames(srt@meta.data)
+  get_feature_values <- function(feat) {
+    if (feat %in% rownames(expr_mat)) return(expr_mat[feat, ])
+    if (feat %in% meta_cols && is.numeric(srt@meta.data[[feat]])) return(srt@meta.data[[feat]])
+    NULL
+  }
+  features <- features[vapply(features, function(f) !is.null(get_feature_values(f)), logical(1))]
   if (length(features) == 0)
-    stop("dark_feature_plot: none of `features` found in assay '", assay, "'.")
+    stop("dark_feature_plot: none of `features` found in assay '", assay,
+         "' or as numeric meta.data columns.")
 
   dark_theme <- theme_void() +
     theme(
@@ -853,18 +861,30 @@ dark_feature_plot <- function(srt, features, assay = "SpaNorm", layer = "data",
       plot.title        = element_text(colour = "white", hjust = 0.5, face = "bold")
     )
 
+  # ── 3. Highlight mask — if given, only these cells carry the colour scale;
+  #      everything else is drawn as a flat darkgrey background layer.
+  highlighted <- if (is.null(cells_highlight)) rep(TRUE, ncol(srt)) else colnames(srt) %in% cells_highlight
+
   plots <- lapply(features, function(feat) {
-    v <- expr_mat[feat, ]
+    v <- get_feature_values(feat)
     if (log1p_transform) v <- log1p(v)
-    df <- data.frame(x = coords$x, y = coords$y, expr = v)
-    if (order_high_on_top) df <- df[base::order(df$expr), ]  # high expr drawn last (on top)
+    df <- data.frame(x = coords$x, y = coords$y, expr = v, highlighted = highlighted)
+
+    df_bg <- df[!df$highlighted, ]
+    df_hl <- df[df$highlighted, ]
+    if (order_high_on_top) df_hl <- df_hl[base::order(df_hl$expr), ]  # high expr drawn last (on top)
 
     wrapped   <- nchar(feat) > title_wrap_width
     title_txt <- if (wrapped) paste(strwrap(feat, width = title_wrap_width), collapse = "\n") else feat
     title_sz  <- if (wrapped) wrapped_title_size else base_title_size
 
-    ggplot(df, aes(x, y, colour = expr, size = expr)) +
-      geom_point(shape = 16) +
+    p <- ggplot()
+    if (nrow(df_bg) > 0) {
+      p <- p + geom_point(data = df_bg, aes(x, y), colour = "darkgrey",
+                          size = min(pt_size_range), shape = 16)
+    }
+    p +
+      geom_point(data = df_hl, aes(x, y, colour = expr, size = expr), shape = 16) +
       scale_colour_gradient(low = low_color, high = high_color, name = "Expression") +
       scale_size_continuous(range = pt_size_range,
                             guide = if (size_legend) "legend" else "none") +

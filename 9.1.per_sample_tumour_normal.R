@@ -54,9 +54,11 @@ meta_programs <- set_names(sheetname, sheetname) %>%
 meta_programs_unlist <- unlist(meta_programs, recursive = F)
 names(meta_programs_unlist) <- make.names(names(meta_programs_unlist), unique = T)
 
-metas    <- readRDS("~/VisHD/6.4.signature_analysis/binarisation/metas.Rds")
-groupdeg <- readRDS(paste0("~/VisHD/6.2archetype_downstream_tumour/archetype_module/",
-                           "group_DEG_enrichment/cross_sample_summary/groupdeg.rds"))
+# groupdeg.rds was never generated (6.3.DT_archetype_module.r's cross_sample_summary/
+# is empty) — skip the G1-G5 group-DEG scoring by using an empty signature list.
+# Every downstream consumer (ucell_score(), fp_save(), the A6 module_anno block)
+# already handles zero signatures gracefully.
+groupdeg <- list()
 
 tumour_markers <- c("AR", "FOLH1", "KLK2", "KLK3", "KLK4", "TMPRSS2",
                     "NKX3-1", "HOXB13", "TRPM8")
@@ -84,14 +86,16 @@ for (d in c(spanorm_dir, pearson_dir, banksy_dir, spatial_dir, barplots_dir))
 
 
 # ── Palette helpers (needed in both load and processing paths) ─────────────────
-group_pal <- c("Neg"      = "lightblue",
-               "G1"       = "red",
-               "G2"       = "gold",
-               "G3"       = "royalblue",
-               "G1/G2"    = "orange",
-               "G1/G3"    = "purple",
-               "G2/G3"    = "green",
-               "G1/G2/G3" = "grey")
+# Built generically from groupdeg names so the palette tracks whatever group
+# labels/count groupdeg.rds carries (currently DT_G1..DT_G5).
+labs         <- names(groupdeg)
+group_combos <- unlist(lapply(seq_along(labs), function(k)
+  combn(labs, k, FUN = function(x) paste(x, collapse = "/"))))
+group_pal <- c(Neg = "lightblue",
+               if (length(group_combos) > 0)
+                 setNames(colorRampPalette(RColorBrewer::brewer.pal(8, "Set2"))(length(group_combos)),
+                          group_combos)
+               else character(0))
 canon <- function(x) vapply(strsplit(x, "/"),
                             function(p) paste(sort(p), collapse = "/"), character(1))
 
@@ -210,27 +214,21 @@ srt <- res$srt; meta_cols <- res$cols
 
 cat("Module scores added. Meta.data columns:", ncol(srt@meta.data), "\n")
 
-# ── A6. Module_group annotation (from 6.2.3 metas) ───────────────────────────
-labs         <- names(groupdeg)
-group_combos <- unlist(lapply(seq_along(labs), function(k)
-  combn(labs, k, FUN = function(x) paste(x, collapse = "/"))))
+# ── A6. Module_group annotation — SKIPPED (6.4.DT_signature_analysis/metas.Rds
+# not available). All tumour cells get a neutral "Unscored" placeholder instead
+# of a Module_group label so downstream code (mg_pal, final_annotation, plots)
+# still runs unchanged.
 group_levels <- c("Neg", group_combos)
-metas_s   <- metas[metas$slide == i, ]
-mg_lookup <- setNames(as.character(metas_s$Module_group), metas_s$cell)
-is_tum    <- srt$compartment == "Tumour"
+is_tum <- srt$compartment == "Tumour"
 module_anno         <- rep("Normal", ncol(srt))
-module_anno[is_tum] <- mg_lookup[colnames(srt)[is_tum]]
-n_unmatched <- sum(is_tum & is.na(module_anno))
-cat(sprintf("\nTumour module_anno: %d/%d matched (%.1f%%); %d -> 'Neg'\n",
-            sum(is_tum) - n_unmatched, sum(is_tum),
-            100 * (sum(is_tum) - n_unmatched) / sum(is_tum), n_unmatched))
-module_anno[is.na(module_anno)] <- "Neg"
+module_anno[is_tum] <- "Unscored"
 
 present <- levels(droplevels(factor(module_anno)))
 mg_pal  <- setNames(group_pal[canon(present)], present)
-mg_pal["Normal"] <- "lightpink"
+mg_pal["Normal"]   <- "lightpink"
+mg_pal["Unscored"] <- "grey70"
 
-mg_levels       <- c("Normal", group_levels)
+mg_levels       <- c("Normal", "Unscored", group_levels)
 srt$module_anno <- factor(module_anno, levels = mg_levels[mg_levels %in% module_anno])
 cat("\nmodule_anno:\n"); print(table(srt$module_anno, useNA = "ifany"))
 
@@ -344,10 +342,6 @@ p_cl   <- DimPlot(srt, reduction = "umap", group.by = "SpaNorm_snn_res.1",
             ggtitle(sprintf("%s — SpaNorm clusters (n=%d)", i,
                             nlevels(factor(srt$SpaNorm_snn_res.1)))) +
             theme(legend.position = "none")
-p_mg   <- DimPlot(srt, reduction = "umap", group.by = "module_anno",
-                  cols = mg_pal, raster = FALSE) +
-            ggtitle(paste(i, "— module group")) +
-            theme(legend.text = element_text(size = 7))
 p_fa   <- DimPlot(srt, reduction = "umap", group.by = "final_annotation",
                   cols = final_anno_pal, raster = FALSE) +
             ggtitle(paste(i, "— final annotation")) +
@@ -358,7 +352,7 @@ p_sub  <- DimPlot(srt, reduction = "umap", group.by = "subclone",
             ggtitle(paste(i, "— subclone"))
 
 ggsave(file.path(spanorm_dir, "1_DimPlot_combined.png"),
-       (p_ct | p_comp | p_cl) / (p_mg | p_fa | p_sub),
+       (p_ct | p_comp | p_cl) / (p_fa | p_sub | plot_spacer()),
        width = 27, height = 14, dpi = 150)
 
 ggsave(file.path(spanorm_dir, "2_cluster_DimPlot_ImageDimPlot.png"),
@@ -394,10 +388,6 @@ pp_cl   <- DimPlot(srt, reduction = "pearsonumap", group.by = "pearson_clusters"
              ggtitle(sprintf("%s — Pearson clusters (n=%d)", i,
                              nlevels(factor(srt$pearson_clusters)))) +
              theme(legend.position = "none")
-pp_mg   <- DimPlot(srt, reduction = "pearsonumap", group.by = "module_anno",
-                   cols = mg_pal, raster = FALSE) +
-             ggtitle(paste(i, "— module group")) +
-             theme(legend.text = element_text(size = 7))
 pp_fa   <- DimPlot(srt, reduction = "pearsonumap", group.by = "final_annotation",
                    cols = final_anno_pal, raster = FALSE) +
              ggtitle(paste(i, "— final annotation")) +
@@ -408,7 +398,7 @@ pp_sub  <- DimPlot(srt, reduction = "pearsonumap", group.by = "subclone",
              ggtitle(paste(i, "— subclone"))
 
 ggsave(file.path(pearson_dir, "1_DimPlot_combined.png"),
-       (pp_ct | pp_comp | pp_cl) / (pp_mg | pp_fa | pp_sub),
+       (pp_ct | pp_comp | pp_cl) / (pp_fa | pp_sub | plot_spacer()),
        width = 27, height = 14, dpi = 150)
 
 ggsave(file.path(pearson_dir, "2_cluster_DimPlot_ImageDimPlot.png"),
@@ -443,10 +433,6 @@ pb_cl   <- DimPlot(srt, reduction = "banksy0.2.umap", group.by = "banksy_cluster
 pb_ct   <- DimPlot(srt, reduction = "banksy0.2.umap", group.by = "cell_type",
                    cols = ct_pal, raster = FALSE) +
              ggtitle(paste(i, "— cell type"))
-pb_mg   <- DimPlot(srt, reduction = "banksy0.2.umap", group.by = "module_anno",
-                   cols = mg_pal, raster = FALSE) +
-             ggtitle(paste(i, "— module group")) +
-             theme(legend.text = element_text(size = 7))
 pb_fa   <- DimPlot(srt, reduction = "banksy0.2.umap", group.by = "final_annotation",
                    cols = final_anno_pal, raster = FALSE) +
              ggtitle(paste(i, "— final annotation")) +
@@ -457,7 +443,7 @@ pb_sub  <- DimPlot(srt, reduction = "banksy0.2.umap", group.by = "subclone",
              ggtitle(paste(i, "— subclone"))
 
 ggsave(file.path(banksy_dir, "1_DimPlot_combined.png"),
-       (pb_cl | pb_ct | pb_sub) / (pb_mg | pb_fa | plot_spacer()),
+       (pb_cl | pb_ct | pb_sub) / (pb_fa | plot_spacer() | plot_spacer()),
        width = 27, height = 14, dpi = 150)
 
 ggsave(file.path(banksy_dir, "2_cluster_DimPlot_ImageDimPlot.png"),
@@ -530,7 +516,7 @@ ifp_feats <- c(tumour_markers, arch_mod_cols, mod_score_cols,
                tn_cols, gs23_cols, meta_cols)
 ifp_save(srt, ifp_feats, file.path(spatial_dir, "2_ImageFeaturePlot_combined.png"))
 
-# ── B5. Bar plots (grouping × cell_type and module_anno) ──────────────────────
+# ── B5. Bar plots (grouping × cell_type and final_annotation) ────────────────
 cat("Bar plots...\n")
 meta <- srt@meta.data
 saveRDS(meta, "tumour_normal_score_meta.Rds")
@@ -543,10 +529,8 @@ grouping_vars <- c("SpaNorm_snn_res.1", "banksy_clusters", "pearson_clusters",
 for (gvar in grouping_vars) {
   barplot_comp(meta, gvar, "cell_type",   ct_pal,
                file.path(barplots_dir, paste0("barplot_", gvar, "_by_cell_type.png")))
-  barplot_comp(meta, gvar, "module_anno", mg_pal,
-               file.path(barplots_dir, paste0("barplot_", gvar, "_by_module_anno.png")))
   barplot_comp(meta, gvar, "final_annotation", final_anno_pal,
-               file.path(barplots_dir, paste0("barplot_", gvar, "_by_final_annotation.png")))             
+               file.path(barplots_dir, paste0("barplot_", gvar, "_by_final_annotation.png")))
 }
 
 cat("==================== ", i, " visualization done ====================\n")

@@ -106,7 +106,7 @@ general_marker_map <- list(
   "Stromal"    = dedup_markers(c(fibro_marker, endo_marker, Stromal_subtype)),       # CAF + Smooth muscle + Endo/Pericyte
   "Myeloid"    = dedup_markers(c(macro_marker, Myeloid_subtype)),
   "Lymphoid"   = dedup_markers(c(Bcell_subtype, Tcell_subtype)),     # B/T cells + Plasma
-  "Epithelial" = dedup_markers(Epithelial_subtype),                         # Epithelial + SVEC
+  "Epithelial" = dedup_markers(c(Epithelial_subtype, list( SVEC = c("SEMG1", "SEMG2", "MUC6", "PIP", "PATE1")) )),                         # Epithelial + SVEC
   "Neural"     = dedup_markers(list(Neuron = Neuron_feature))
 )
 

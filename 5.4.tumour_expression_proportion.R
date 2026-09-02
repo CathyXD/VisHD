@@ -39,7 +39,24 @@ if (file.exists(deg_path)) {
 ar_genes <- c("AR", "FOLH1", "KLK3", "NKX3-1", "TMPRSS2", "KLK4", "STEAP2", "STEAP1")
 ne_genes <- c("CHGA", "CHGB", "SCG2", "SLC18A1", "SYNGR4", "NPB", "PTPN5", "HDAC9", "SYP", "ENO2", "NCAM1", "ELAVL4", "GABRG2", "GABRA1", "GABRB2")
 
-genes <- unique(c("AR", "FOLH1", top_degs, ar_genes, ne_genes))
+# Epithelial signature: four sub-programs (Club/Hillock/Basal/Luminal)
+epithelial_genes <- list(
+  Club    = c("SCGB1A3", "WFDC2", "LCN2", "MMP7", "KRT4", "TACSTD2", "SCGB3A1"),
+  Hillock = c("KRT13", "S100A16", "S100A14", "KRT19"),
+  Basal   = c("TP63", "KRT14", "KRT5"),
+  Luminal = c("KLK4", "KLK3", "KLK2", "ACPP", "AR")
+)
+epi_genes   <- unlist(epithelial_genes, use.names = FALSE)
+epi_subtype <- setNames(rep(names(epithelial_genes), lengths(epithelial_genes)), epi_genes)
+
+# Gene panels scored per-cell as AddModuleScore signatures (mirrors the
+# clean_module scoring convention in 4.1.tumour_split.R)
+signature_panels <- c(
+  list(AR_genes = ar_genes, NE_genes = ne_genes),
+  setNames(epithelial_genes, paste0("Epithelial_", names(epithelial_genes)))
+)
+
+genes <- unique(c("AR", "FOLH1", top_degs, ar_genes, ne_genes, epi_genes))
 cat("Testing", length(genes), "genes total\n")
 
 # ── Spatial dark_feature_plots (per gene, per sample) + SpaNorm expression ───
@@ -65,6 +82,8 @@ spanorm_list <- list()
 
 # ── Per-sample proportion calculation ─────────────────────────────────────────
 prop_list <- list()
+met_pseudobulk_list <- list()
+sig_score_list <- list()
 for (s in samples) {
   f <- file.path(base_dir, s, "tumour", "tumour_srt.qs2")
   if (!file.exists(f)) { message("Skipping ", s, " - missing tumour_srt.qs2"); next }
@@ -93,6 +112,47 @@ for (s in samples) {
     stringsAsFactors = FALSE
   )
 
+  # Metabolism: pseudobulk mean AUCell score per KEGG pathway, per category
+  # (scMetabolism output from 4.3.public_signature_exp.R)
+  met_csv <- file.path(base_dir, s, "tumour", "metabolism_KEGG_score.csv")
+  if (file.exists(met_csv)) {
+    met_mat <- as.matrix(read.csv(met_csv, row.names = 1, check.names = FALSE))
+    cat_by_cell <- setNames(obj$category_bin, colnames(obj))
+    common_cells <- intersect(colnames(met_mat), names(cat_by_cell))
+    for (cat_v in c("DT", "CB")) {
+      cells <- common_cells[cat_by_cell[common_cells] == cat_v]
+      cells <- cells[!is.na(cells)]
+      if (length(cells) == 0) next
+      met_pseudobulk_list[[length(met_pseudobulk_list) + 1]] <- data.frame(
+        sample     = s,
+        category   = cat_v,
+        pathway    = rownames(met_mat),
+        mean_score = Matrix::rowMeans(met_mat[, cells, drop = FALSE]),
+        stringsAsFactors = FALSE
+      )
+    }
+  } else {
+    message("Skipping metabolism for ", s, " - missing metabolism_KEGG_score.csv")
+  }
+
+  # Per-signature module score (AddModuleScore on SpaNorm data), per cell
+  DefaultAssay(obj) <- "SpaNorm"
+  for (sig_name in names(signature_panels)) {
+    sig_genes <- intersect(signature_panels[[sig_name]], rownames(obj))
+    if (length(sig_genes) < 2) next
+    obj <- AddModuleScore(obj, features = list(sig_genes), name = "SigScore")
+    sig_score_list[[length(sig_score_list) + 1]] <- data.frame(
+      sample    = s,
+      cell      = colnames(obj),
+      signature = sig_name,
+      score     = obj$SigScore1,
+      category  = obj$category_bin,
+      stringsAsFactors = FALSE
+    )
+    obj$SigScore1 <- NULL
+  }
+  DefaultAssay(obj) <- "Spatial"
+
   # Per-gene dark_feature_plot for this sample, titled with the sample name
   # (samples are combined side-by-side per gene once the loop finishes)
   for (g in available) {
@@ -120,6 +180,11 @@ prop_df <- bind_rows(prop_list)
 prop_df$gene <- factor(prop_df$gene, levels = genes[genes %in% prop_df$gene])
 saveRDS(prop_df,  file.path(outdir, "expression_proportion.Rds"))
 write.csv(prop_df, file.path(outdir, "expression_proportion.csv"), row.names = FALSE)
+
+sig_score_df   <- bind_rows(sig_score_list)
+sig_score_valid <- sig_score_df %>% filter(!is.na(category))
+saveRDS(sig_score_df,  file.path(outdir, "signature_scores_per_cell.Rds"))
+write.csv(sig_score_df, file.path(outdir, "signature_scores_per_cell.csv"), row.names = FALSE)
 
 # ── Aggregated per-gene spatial dark_feature_plots (samples 1-8 side by side) ─
 for (g in genes) {
@@ -234,6 +299,26 @@ spanorm_pos$gene <- factor(spanorm_pos$gene, levels = genes[genes %in% spanorm_p
 make_expr_boxplot(filter(spanorm_pos,  gene %in% key_genes), "AR_FOLH1")
 make_expr_boxplot(filter(spanorm_pos, !gene %in% key_genes), "DEGs")
 
+# ── Boxplot: per-cell signature (module) scores, DT vs CB per sample ────────
+make_signature_boxplot <- function(df, tag) {
+  n_sig <- length(unique(df$signature))
+  if (n_sig == 0) { message("No signatures for ", tag, " - skipping signature boxplot"); return(invisible(NULL)) }
+  n_col <- min(4, n_sig)
+  n_row <- ceiling(n_sig / n_col)
+  p <- ggplot(df, aes(sample, score, fill = category)) +
+    geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA, alpha = 0.7) +
+    facet_wrap(~ signature, scales = "free_y", ncol = n_col) +
+    scale_fill_manual(values = c(CB = "steelblue", DT = "firebrick")) +
+    labs(title = paste0("Signature (module) scores - DT vs CB (", tag, ")"),
+         x = NULL, y = "Module score") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+          strip.text  = element_text(size = 9, face = "bold"))
+  ggsave(file.path(png_dir, paste0("3b_boxplot_signature_scores_", tag, ".png")),
+         p, width = n_col * 3.5, height = n_row * 2.8, dpi = 200, limitsize = FALSE)
+}
+make_signature_boxplot(sig_score_valid, "panels")
+
 # ── Individual per-gene comparison for the AR and NE marker panels ────────────
 # Box-only (DT vs CB), one figure per panel, facets ordered as the panel is listed.
 plot_panel <- function(panel, tag) {
@@ -243,6 +328,7 @@ plot_panel <- function(panel, tag) {
 }
 plot_panel(ar_genes, "AR_genes")
 plot_panel(ne_genes, "NE_genes")
+plot_panel(epi_genes, "Epithelial")
 
 # ── Genes with significant Wilcoxon (p < 0.05) ───────────────────────────────
 sig_wilcox <- wilcox_df %>% filter(!is.na(p), p < 0.05) %>% arrange(p)
@@ -252,5 +338,90 @@ write.csv(sig_wilcox, file.path(outdir, "significant_wilcoxon_genes.csv"),
           row.names = FALSE)
 cat("\nSignificant Wilcoxon genes (p<0.05):", nrow(sig_wilcox), "\n")
 print(sig_wilcox)
+
+# ── Pseudobulk expression z-score heatmaps, gridded by sample_category ───────
+# (e.g. "LUT-245-07_CB", "LUT-245-09_DT") — one heatmap per gene-signature set:
+#   AR_FOLH1, AR_genes, NE_genes, DEGs (SpaNorm expression) and the new
+#   Metabolism panel (scMetabolism KEGG AUCell scores from 4.3).
+gene_pseudobulk <- spanorm_df %>%
+  filter(!is.na(category)) %>%
+  group_by(gene, sample, category) %>%
+  summarise(value = mean(expression), .groups = "drop") %>%
+  rename(item = gene) %>%
+  mutate(sample_category = paste0(sample, "_", category))
+
+met_pseudobulk <- bind_rows(met_pseudobulk_list) %>%
+  rename(item = pathway, value = mean_score) %>%
+  mutate(sample_category = paste0(sample, "_", category))
+
+sig_pseudobulk <- sig_score_valid %>%
+  group_by(item = signature, sample, category) %>%
+  summarise(value = mean(score), .groups = "drop") %>%
+  mutate(sample_category = paste0(sample, "_", category))
+
+plot_signature_heatmap <- function(df, tag, item_order = NULL, row_split_vec = NULL) {
+  if (nrow(df) == 0) { message("No data for ", tag, " - skipping heatmap"); return(invisible(NULL)) }
+  require(ComplexHeatmap)
+  require(circlize)
+
+  mat_df <- df %>% select(item, sample_category, value) %>%
+    pivot_wider(names_from = sample_category, values_from = value)
+  mat <- as.matrix(mat_df[, -1, drop = FALSE])
+  rownames(mat) <- mat_df$item
+  if (!is.null(item_order)) mat <- mat[intersect(item_order, rownames(mat)), , drop = FALSE]
+  mat <- mat[, sort(colnames(mat)), drop = FALSE]
+
+  z <- t(scale(t(mat)))
+  z[is.na(z)] <- 0
+
+  cat_anno <- sub("^.*_", "", colnames(z))
+  top_ann <- ComplexHeatmap::HeatmapAnnotation(
+    Category = cat_anno,
+    col      = list(Category = c(CB = "steelblue", DT = "firebrick"))
+  )
+  col_fun <- circlize::colorRamp2(c(-2, 0, 2), c("#2166ac", "white", "#b2182b"))
+
+  # Optional row grouping (e.g. epithelial sub-programs) with a colour-coded
+  # left annotation + row_split so sub-groups stay visually separated.
+  row_split   <- NULL
+  left_ann    <- NULL
+  if (!is.null(row_split_vec)) {
+    row_split <- factor(row_split_vec[rownames(z)], levels = unique(row_split_vec))
+    grp_levels <- levels(row_split)
+    grp_col <- setNames(
+      colorRampPalette(RColorBrewer::brewer.pal(max(3, length(grp_levels)), "Set2"))(length(grp_levels)),
+      grp_levels
+    )
+    left_ann <- ComplexHeatmap::rowAnnotation(
+      Subtype = row_split,
+      col     = list(Subtype = grp_col),
+      show_annotation_name = FALSE
+    )
+  }
+
+  ht <- ComplexHeatmap::Heatmap(
+    z, name = "z-score", col = col_fun,
+    cluster_rows = TRUE, cluster_columns = TRUE,
+    row_split = row_split,
+    left_annotation = left_ann,
+    top_annotation = top_ann,
+    column_title = paste0("Pseudobulk expression z-score (", tag, ")"),
+    row_names_gp = grid::gpar(fontsize = 8),
+    column_names_gp = grid::gpar(fontsize = 8)
+  )
+  out_file <- file.path(png_dir, paste0("4_heatmap_pseudobulk_", tag, ".pdf"))
+  pdf(out_file, width = max(8, ncol(z) * 0.5), height = max(6, nrow(z) * 0.18 + 2))
+  ComplexHeatmap::draw(ht)
+  dev.off()
+  message("Saved heatmap: ", out_file)
+}
+
+plot_signature_heatmap(filter(gene_pseudobulk, item %in% key_genes), "AR_FOLH1", key_genes)
+plot_signature_heatmap(filter(gene_pseudobulk, item %in% ar_genes),  "AR_genes", ar_genes)
+plot_signature_heatmap(filter(gene_pseudobulk, item %in% ne_genes),  "NE_genes", ne_genes)
+plot_signature_heatmap(filter(gene_pseudobulk, item %in% top_degs),  "DEGs")
+plot_signature_heatmap(filter(gene_pseudobulk, item %in% epi_genes), "Epithelial", epi_genes, row_split_vec = epi_subtype)
+plot_signature_heatmap(met_pseudobulk, "Metabolism")
+plot_signature_heatmap(sig_pseudobulk, "Signature_scores", names(signature_panels))
 
 message("\nDone. Results in: ", outdir)

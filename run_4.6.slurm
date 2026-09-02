@@ -2,11 +2,10 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=80G
-#SBATCH --time=3:00:00
-#SBATCH --job-name=final_clear_norm_ps
-#SBATCH --array=1-8
-#SBATCH --output="slurmout/8.6.final_clear_normal_persample-%j-%a.out"
+#SBATCH --mem=100G
+#SBATCH --time=2:00:00
+#SBATCH --job-name=tumour_visual
+#SBATCH --output="slurmout/4.6.tumour_visual-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -32,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/8.6.final_clear_normal_persample.R "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/4.6.tumour_visual.r

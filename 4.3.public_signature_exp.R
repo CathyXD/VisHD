@@ -21,7 +21,7 @@ names(archetype_module) <- c("AR","Inflammation", "NE1","NE2", "Cycling","Glycol
 # Define file paths=========
 args <- commandArgs(trailingOnly = TRUE)
 arg  <- as.numeric(args[1])
-paths <- system("realpath ~/VisHD/LUT-245-*/", intern = T)
+paths <- system("realpath ~/VisHD/LUT-245-*/tumour", intern = T)
 path <- paths[arg]
 setwd(path)
 samples <- sapply(strsplit(paths, split = "/"), '[', 5)
@@ -30,15 +30,13 @@ i = samples[arg]
 cat("working at", path, "\n")
 
 
-out_qs <- "tumour_subclone_srt_with_public_signatures.qs2"
+out_qs <- "tumour_srt_with_public_signatures.qs2"
 scores_present <- file.exists(out_qs)
 if (scores_present) {
   cat("Loading existing object:", out_qs, "\n")
   srt <- qs_read(out_qs)
 } else {
-  srt <- qs_read("tumour_subclone_srt.qs2")
-  srt <- subset(srt, subset = tumour_anno != "Removed")
-  srt <- do.spanorm(srt)
+  srt <- qs_read("tumour_srt.qs2")
 }
 
 # ── Pearson residual PCA + UMAP ──────────────────────────────────────────────
@@ -100,14 +98,14 @@ plot_module_group <- function(srt, gene_sets, parent_name, out_fp, out_ifp, ncol
       if (!red %in% Reductions(srt)) next
       fp_list <- mapply(function(feat, ttl) {
         FeaturePlot(srt, feat, reduction = red) +
-          scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred", name = ttl) +
+          scale_color_gradient2(low = "steelblue", mid = "gold", high = "indianred", name = ttl) +
           ggtitle(ttl) +
           theme(plot.title = element_text(size = 9), legend.position = "right")
       }, feats, titles, SIMPLIFY = FALSE)
 
       page_fp <- wrap_plots(fp_list, ncol = ncol) +
         plot_annotation(
-          title = paste0(parent_name, " (", red, ")"),
+          title = paste0(parent_name, " (", red, " ModuleScores)"),
           theme = theme(plot.title = element_text(size = 14, face = "bold"))
         )
       red_suffix <- if (red == "pearsonumap") "_pearsonumap" else ""
@@ -162,3 +160,61 @@ if (is_nested) {
 message("\nAll module score plots saved to:\n  ", out_fp, "\n  ", out_ifp)
 
 qs_save(srt, "tumour_anno_srt_with_public_signatures.qs2")
+
+# ── 4. scMetabolism KEGG programs ────────────────────
+# install.packages(c("devtools", "data.table", "wesanderson", "Seurat", "devtools", "AUCell", "GSEABase", "GSVA", "ggplot2","rsvd"))
+# devtools::install_github("YosefLab/VISION@v2.1.0") #Please note that the version would be v2.1.0
+# remotes::install_version("loe", "1.1", lib = "~/R_Library/4.5")
+# install.packages(c('loe', "wesanderson"), lib = "~/R_Library/4.5")
+# devtools::install_github("YosefLab/VISION@v2.1.0", lib = "~/R_Library/4.5") #Please note that the version would be v2.1.0
+# devtools::install_github("wu-yc/scMetabolism", lib = "~/R_Library/4.5")
+
+library(scMetabolism, lib.loc = "~/R_Library/4.5")
+library(AUCell, lib.loc = "~/R_Library/4.5")
+library(GSEABase, lib.loc = "~/R_Library/4.5")
+library(wesanderson, lib.loc = "~/R_Library/4.5")
+
+# scMetabolism hardcodes assay "RNA" — alias the raw Spatial counts so
+# sc.metabolism.Seurat() can find them.
+if (!"RNA" %in% Assays(srt)) {
+  srt[["RNA"]] <- CreateAssayObject(counts = GetAssayData(srt, assay = "Spatial", layer = "counts"))
+}
+
+countexp.Seurat<-sc.metabolism.Seurat(obj = srt, method = "AUCell", imputation = F, ncores = 2, metabolism.type = "KEGG")
+
+metabolism.matrix <- countexp.Seurat@assays$METABOLISM$score
+colnames(metabolism.matrix) <- colnames(countexp.Seurat)
+
+pathways <- rownames(metabolism.matrix)
+
+qs_save(countexp.Seurat, "metabolism_srt.qs2")
+write.csv(metabolism.matrix, "metabolism_KEGG_score.csv")
+
+out_met <- file.path(path, "png", "public_signatures", "Metabolism")
+dir.create(out_met, showWarnings = FALSE, recursive = TRUE)
+
+met_ncol  <- 5
+met_pages <- split(pathways, ceiling(seq_along(pathways) / 20))
+
+DefaultAssay(countexp.Seurat) <- "RNA"
+
+for (pg in seq_along(met_pages)) {
+  feats  <- met_pages[[pg]]
+  p_list <- lapply(feats, function(pw) {
+    srt$score <- as.numeric(metabolism.matrix[pw, ])
+    FeaturePlot(obj = srt, features = "score", reduction = "pearsonumap", order = TRUE) +
+          scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred", name = "AUCell", midpoint = 0.1) +
+          ggtitle(pw) +
+          theme(plot.title = element_text(size = 9), legend.position = "right")
+  })
+  page <- wrap_plots(p_list, ncol = met_ncol) +
+    plot_annotation(
+      title = "KEGG metabolism (AUCell)",
+      theme = theme(plot.title = element_text(size = 14, face = "bold"))
+    )
+  ggsave(file.path(out_met, paste0("metabolism_p", pg, ".png")), plot = page,
+         width = met_ncol * 3, height = ceiling(length(feats) / met_ncol) * 3 + 0.8,
+         dpi = 200, limitsize = FALSE)
+}
+
+message("Done: KEGG metabolism pathway plots saved to ", out_met)

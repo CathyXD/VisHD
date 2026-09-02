@@ -286,10 +286,11 @@ summary_df <- data.frame(
 write.csv(summary_df, file.path(outdir, "DEG_summary.csv"), row.names = FALSE)
 print(summary_df)
 
-# ── 8. Venn overlap vs 5.3 paired_sample (DT vs CB) ───────────────────────────
+# ── 8. Venn overlap vs 5.3.2 unpaired tn (DT vs CB) ───────────────────────────
 # Post -> DT, Pre -> CB: compare RP cohort (Post vs Pre) significant DEGs
-# against the internal tumour cohort (5.3, sample-level DT vs CB) significant DEGs.
-dt_res_file <- file.path(base_dir, "5.3.DESeq2_results", "paired_sample", "deseq2_res_DT_vs_CB.Rds")
+# against the internal tumour cohort (5.3.2, unpaired DT vs CB on
+# tumour_normal_anno_srt-derived pseudobulks) significant DEGs.
+dt_res_file <- file.path(base_dir, "5.3.2.tn_DESeq2", "deseq2_res.Rds")
 
 if (file.exists(dt_res_file)) {
   res_dt_df <- readRDS(dt_res_file)
@@ -345,7 +346,7 @@ if (file.exists(dt_res_file)) {
   write.csv(gene_overlap_pre_cb,  file.path(outdir, "gene_overlap_Pre_vs_CB.csv"), row.names = FALSE)
   cat("Per-gene overlap tables saved\n")
 } else {
-  cat("5.3 paired_sample results not found (", dt_res_file, ") — skipping Venn comparison\n", sep = "")
+  cat("5.3.2 results not found (", dt_res_file, ") — skipping Venn comparison\n", sep = "")
 }
 
 message("\nDone. Results in: ", outdir)

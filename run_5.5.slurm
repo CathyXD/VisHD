@@ -3,10 +3,9 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=80G
-#SBATCH --time=4:00:00
-#SBATCH --job-name=DT_signature_analysis
-#SBATCH --array=1-8
-#SBATCH --output="slurmout/6.4.DT_signature_analysis-%j-%a.out"
+#SBATCH --time=2:00:00
+#SBATCH --job-name=deseq2_public_compare
+#SBATCH --output="slurmout/5.5.public_data_compare-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -32,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/6.4.DT_signature_analysis.r "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/5.5.public_data_compare.R

@@ -19,9 +19,18 @@
 #   meta_program_scores/<celltype>_UCell/<program>.png  (UCell)
 #   ../normal_subtype_reclustering/<celltype>_recluster_srt.qs2  (cached per subtype)
 #   subtype_marker_scores/<celltype>_all_marker_scores.png       (all_marker on each subtype's own reclustering)
-# Writes (to ~/VisHD/8.5.normal_cell_subtypes/<celltype>/):
-#   <celltype>_deg_subcluster.{Rds,csv}       (MAST DE between pearson_clusters_batch subclusters)
-#   <celltype>_marker_dotplot.png             (DotPlot vs. the cell type's curated marker list)
+# Writes (to ~/VisHD/8.5.normal_cell_subtypes/cell_subtype/):
+#   <celltype>_recluster_srt.qs2               (cached reclustering, flat)
+#   <celltype>/<celltype>_deg_subcluster{,_rpca}.{Rds,csv}   (MAST DE, pearson + rpca subclusters)
+#   <celltype>/<celltype>_DimPlot_{rpca,pearson}.png
+#   <celltype>/<celltype>_nCount_vlnplot_{rpca,pearson}.png
+#   <celltype>/<celltype>_marker_dotplot{,_rpca}.png
+#
+# The general_layer (coarse Stromal/Myeloid/Lymphoid/Epithelial/Neural) subset
+# -> recluster -> RPCA-integrate -> MAST DE -> visualize pipeline previously
+# run here as Sections 7-9 now lives in 8.5.2.general_layer_analysis.R, which
+# reads the `general_layer` column this script derives and saves back onto
+# normal_srt_final_anno.qs2 (must run after this script at least once).
 #
 # Skipped vs 9.2 (annotation is already final): TME annotation pipeline, the
 # DT-vs-CB paired Wilcoxon, and the annotated qs2 / AnnData re-export.
@@ -67,23 +76,73 @@ cat(sprintf("NA fraction after join: %.4f (%d / %d)\n",
 # ── 0. All-marker DotPlot across final_annotation ─────────────────────────────
 # Cells grouped by final_annotation; markers grouped by all_marker's own list
 # split (Hepatocyte, Neuron, Epithelial, ... — DotPlot facets by list name).
-feats_all <- lapply(all_marker, function(g) intersect(g, rownames(srt)))
+# Marker panels grouped by broad cell-type compartment
+marker_list <- list(
+  # --- Stromal / mesenchymal ---
+  CAF           = c("COL1A1", "COL1A2", "DCN", "LUM", "SFRP4"),
+  Smooth_muscle = c("ACTA2", "MYH11", "TAGLN", "CNN1", "DES"),
+  Pericyte      = c("RGS5", "NOTCH3", "MCAM", "BCAM", "PDGFRB"),   # PDGFRB canonical, NOT in DEGs
+
+  # --- Immune ---
+  Macrophages   = c("CD68", "CD163", "CSF1R", "C1QA", "MS4A7"),
+  T_cells       = c("TRAC", "TRBC2", "IL7R", "IL32", "IKZF1"),
+  B_cells       = c("MS4A1", "CD79A", "CD79B", "CD19", "BANK1"),   # canonical, NOT in DEGs
+  Plasma        = c("MZB1", "JCHAIN", "XBP1", "IGHG1", "TXNDC5"),
+
+  # --- Epithelial ---
+  Epithelial    = c("KRT5", "KRT15", "KRT17", "TACSTD2", "CLDN4"),
+  SVEC          = c("SEMG1", "SEMG2", "MUC6", "PIP", "PATE1"),
+
+  # --- Neural (Schwann cells/peripheral glia) ---
+  Neurons       = c("S100B", "NRXN1", "SCN7A", "PMP22", "PTGDS") 
+)
+
+srt$final_annotation[srt$final_annotation == "Pericyte"] <- "Endo/Pericyte"
+srt$final_annotation[srt$final_annotation == "B cells"] <- "B/T cells"
+srt$final_annotation[srt$final_annotation == "Neurons"] <- "Glial cells"
+
+celltype_levels <- c(
+  "CAF", "Smooth muscle", "Endo/Pericyte",   # stromal
+  "Macrophages", "B/T cells", "Plasma",   # immune
+  "Epithelial", "SVEC",                 # epithelial
+  "Glial cells"                             # neural
+)
+srt$final_annotation <- factor(srt$final_annotation, levels = celltype_levels)
+
+# General-layer grouping: coarse compartment reference for subsetting
+general_layer_map <- c(
+  "B/T cells"     = "Lymphoid",
+  "Plasma"        = "Lymphoid",
+  "Macrophages"   = "Myeloid",
+  "Epithelial"    = "Epithelial",
+  "SVEC"          = "Epithelial",
+  "Smooth muscle" = "Stromal",
+  "CAF"           = "Stromal",
+  "Endo/Pericyte" = "Stromal",
+  "Glial cells" = "Neural"
+)
+srt$general_layer <- factor(unname(general_layer_map[as.character(srt$final_annotation)]),
+                             levels = c("Stromal", "Myeloid", "Lymphoid", "Epithelial", "Neural"))
+
+feats_all <- lapply(marker_list, function(g) intersect(g, rownames(srt)))
 feats_all <- feats_all[lengths(feats_all) > 0]
 dp_all <- DotPlot(srt, features = feats_all, group.by = "final_annotation",
-                  assay = "Spatial") +
-  coord_flip() +
-  ggtitle("all_marker expression by final annotation") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-ggsave(file.path(viz_dir, "0_all_marker_dotplot.png"),
-       dp_all, width = 8, height = max(4, length(unlist(feats_all)) * 0.25 + 2),
-       dpi = 300, limitsize = FALSE)
+                  assay = "SCT") +
+  # coord_flip() +
+  ggtitle("marker_list expression by final annotation") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_colour_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0)
+ggsave(file.path(viz_dir, "0_marker_list_dotplot.png"),
+       dp_all, width = 20, height = 6,
+       dpi = 300, limitsize = FALSE,bg = "white")
+
 
 # ── 1. DimPlot of the final annotation on the batch-corrected UMAP ────────────
 dp <- DimPlot(srt, reduction = "pearsonbatchumap",
-              group.by = "final_annotation", label = TRUE, label.size = 3,
+              group.by = "final_annotation", label = TRUE, label.size = 6,
               repel = TRUE, cols = as.vector(polychrome())) +
   ggtitle("Final normal annotation (batch corrected)") +
-  theme(legend.text = element_text(size = 7))
+  theme(legend.text = element_text(size = 15))
 ggsave(file.path(viz_dir, "1_final_annotation_DimPlot.png"),
        dp, width = 9, height = 7, dpi = 400)
 
@@ -121,8 +180,36 @@ bar <- bar +
         legend.key.size = unit(0.3, "cm"),
         legend.text = element_text(size = 6),
         strip.text = element_text(size = 9))
-ggsave(file.path(viz_dir, "2_composition_bar.png"), bar, width = 16, height = 9, dpi = 400)
+ggsave(file.path(viz_dir, "2_composition_bar.png"), bar, width = 8, height = 4, dpi = 400)
 write.csv(comp, file.path(viz_dir, "composition.csv"), row.names = FALSE)
+
+bar2 <- bar + facet_grid(final_annotation ~ slide, scales = "free_x", space = "free_x") +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        strip.text = element_text(size = 6))+
+  theme_bw(base_size = 15) 
+ggsave(file.path(viz_dir, "2_composition_bar_facet.png"), bar2, width = 11, height = 11, dpi = 400)
+
+# ── 2c. DT - CB proportion difference per cell type x slide ───────────────────
+if (has_category) {
+  diff_df <- comp %>%
+    select(slide, cat2, final_annotation, prop) %>%
+    pivot_wider(names_from = cat2, values_from = prop) %>%
+    mutate(diff = DT - CB)
+
+  diff_bar <- ggplot(diff_df, aes(x = "", y = diff, fill = diff > 0)) +
+    geom_col() +
+    scale_fill_manual(values = c(`TRUE` = "red", `FALSE` = "blue"), guide = "none") +
+    facet_grid(final_annotation ~ slide, scales = "free_x", space = "free_x") +
+    labs(x = NULL, y = "Proportion difference (DT - CB)",
+         title = "Final annotation — DT minus CB proportion per cell type x slide") +
+    theme_bw() +
+    theme(axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          strip.text = element_text(size = 6))
+  ggsave(file.path(viz_dir, "2c_DT_minus_CB_diff_bar.png"),
+         diff_bar, width = 8, height = 8, dpi = 400)
+}
 
 # ── 3. Boxplot: each annotation's proportion across the 8 slides ──────────────
 comp_slide <- srt@meta.data %>%
@@ -138,11 +225,10 @@ box <- ggplot(comp_slide,
   geom_jitter(aes(color = slide), width = 0.15, alpha = 0.6, size = 1) +
   labs(x = NULL, y = "Proportion (per slide)",
        title = "Per-slide variability of each final annotation") +
-  theme_minimal(base_size = 10) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
-        legend.key.size = unit(0.3, "cm"))
+  theme_minimal(base_size = 12) +
+  theme(legend.key.size = unit(0.3, "cm"))
 ggsave(file.path(viz_dir, "3_final_annotation_boxplot.png"),
-       box, width = 12, height = 6, dpi = 400)
+       box, width = 10, height = 2, dpi = 400)
 
 # ── 3b. Paired DT vs CB boxplot per cell type (slide is the pairing unit) ─────
 # Uses the per-slide x cat2 proportions from section 2 (CB = CB 0 + CB 1).
@@ -160,13 +246,13 @@ if (has_category) {
                        line.color = "grey60", line.size = 0.3,
                        point.size = 1, short.panel.labs = TRUE) +
     stat_compare_means(method = "wilcox.test", paired = TRUE,
-                       label = "p.format", size = 2.6) +
+                       label = "p.format", size = 2.6, label.y.npc = 0.7) +
     labs(x = NULL, y = "Proportion (per slide x category)",
          title = "Final annotation — DT vs CB per cell type (paired Wilcoxon)") +
     theme(axis.text.x = element_text(size = 8),
           strip.text = element_text(size = 7))
   ggsave(file.path(viz_dir, "3b_DT_vs_CB_boxplot.png"),
-         box_pair, width = 9, height = 8, dpi = 400)
+         box_pair, width = 6, height = 5, dpi = 400)
 }
 
 # ── 4. Meta-program module scores (FeaturePlot per program, per cell-type) ────
@@ -187,7 +273,7 @@ for (ct in names(meta_programs)) {
   for (prog in names(meta_programs[[ct]])) {
     genes <- intersect(meta_programs[[ct]][[prog]], genes_in_srt)
     if (length(genes) < 3) next
-    srt <- AddModuleScore(srt, features = list(genes), name = "mp_score", assay = "Spatial")
+    srt <- AddModuleScore(srt, features = list(genes), name = "mp_score", assay = "SCT")
     fp <- FeaturePlot(srt, features = "mp_score1",
                       reduction = "pearsonbatchumap", order = TRUE) +
       scale_color_gradient(low = "grey90", high = "darkblue", limits = c(0, NA)) +
@@ -213,18 +299,37 @@ for (ct in names(meta_programs)) {
            fp, width = 6, height = 5, dpi = 300)
   }
 }
-# ── 5. Per-subtype reclustering + all-marker expression testing ──────────────
-# For each final_annotation cell type: subset, redo Pearson PCA (batch-
-# corrected by slide) + clustering, then score every all_marker signature
-# (not just the matching one) to check subcluster purity/contamination.
-# Cached per cell type — skips the recluster+score step once columns exist.
-subtype_dir <- file.path(out_dir, "normal_subtype_reclustering")
-dir.create(subtype_dir, showWarnings = FALSE, recursive = TRUE)
-marker_viz_dir <- file.path(viz_dir, "subtype_marker_scores")
-dir.create(marker_viz_dir, showWarnings = FALSE, recursive = TRUE)
+# ── 5. Per-subtype processing ─────────────────────────────────────────────────
+# For each final_annotation cell type: subset + recluster (batch-corrected
+# Pearson PCA) and score every all_marker signature, then RPCA-integrate and
+# run MAST DE on both the RPCA and pearson_clusters_batch clusterings. Pure
+# compute/cache — no plotting here; Section 6 draws everything from the cache.
+marker_viz_dir  <- file.path(viz_dir, "subtype_marker_scores")
+subtype_out_dir <- path.expand("~/VisHD/8.5.normal_cell_subtypes")
+subtype_dir     <- file.path(subtype_out_dir, "cell_subtype")
+dir.create(subtype_dir,     showWarnings = FALSE, recursive = TRUE)
+dir.create(marker_viz_dir,  showWarnings = FALSE, recursive = TRUE)
+dir.create(subtype_out_dir, showWarnings = FALSE, recursive = TRUE)
+options(future.globals.maxSize = 50 * 1024^3)
 
 min_cells_subtype <- 50
+ct_marker_map <- list(
+  "B/T cells"     = c(bcell_marker, Tcell_subtype),
+  "Plasma"        = bcell_marker,
+  "Macrophages"   = macro_marker,
+  "Epithelial"    = epi_marker,
+  "SVEC"          = epi_marker,        # Seminal Vesicle Epithelial Cell
+  "CAF"           = fibro_marker,
+  "Smooth muscle" = fibro_marker,
+  "Endo/Pericyte" = endo_marker,
+  "Glial cells" = list(Neuron = Neuron_feature)
+)
+
+
 celltypes <- sort(unique(na.omit(srt$final_annotation)))
+
+cat("Saving updated final_annotation back to", in_srt, "\n")
+qs_save(srt, in_srt)
 
 for (ct in celltypes) {
   ct_safe <- gsub("[^A-Za-z0-9]+", "_", ct)
@@ -243,43 +348,120 @@ for (ct in celltypes) {
 
   if (!all(names(all_marker) %in% colnames(sub_srt@meta.data))) {
     cat(sprintf("[%s] reclustering %d cells...\n", ct, ncol(sub_srt)))
-    sub_srt <- do.pearson_pca(sub_srt, batch_variable = "slide", assay = "Spatial",
-                              find_hvgs = TRUE, resolution = 1)
-    sub_srt <- AddModuleScore(sub_srt, features = all_marker)
-    added <- paste0("Cluster", seq_along(all_marker))
-    colnames(sub_srt@meta.data)[match(added, colnames(sub_srt@meta.data))] <- names(all_marker)
+    sub_srt <- SCTransform(sub_srt, assay = "Spatial", verbose = FALSE)
+    hvg_sct <- VariableFeatures(sub_srt, assay = "SCT")
+    spatial_genes <- rownames(GetAssayData(sub_srt, assay = "Spatial", layer = "counts"))
+    hvg <- intersect(hvg_sct, spatial_genes)
+    VariableFeatures(sub_srt, assay = "Spatial") <- hvg
+    sub_srt <- do.pearson_pca(sub_srt,batch_variable = "slide", assay = "Spatial",
+                      find_hvgs = FALSE, reduction_prefix = "pearsonbatch",
+                      clusters_col = "pearson_clusters_batch", resolution = 1)
+    n_sct_genes <- nrow(GetAssayData(sub_srt, assay = "SCT"))
+    for (nb in c(24, 12, 6, 3, 1)) {
+      scored <- tryCatch(
+        AddModuleScore(sub_srt, features = marker_list, name = "Cluster",
+                       assay = "SCT", nbin = nb, ctrl = min(100, n_sct_genes)),
+        error = function(e) NULL
+      )
+      if (!is.null(scored)) { sub_srt <- scored; break }
+    }
+    added <- paste0("Cluster", seq_along(marker_list))
+    colnames(sub_srt@meta.data)[match(added, colnames(sub_srt@meta.data))] <- names(marker_list)
     qs_save(sub_srt, ct_path)
   } else {
     cat(sprintf("[%s] marker scores already present — skipping recluster\n", ct))
   }
 
-  fp <- FeaturePlot(sub_srt, names(all_marker), reduction = "pearsonbatchumap",
-                    cols = c("white", "red"), order = TRUE) +
-    plot_layout(ncol = 4)
-  ggsave(file.path(marker_viz_dir, paste0(ct_safe, "_all_marker_scores.png")),
-         fp, width = 16, height = 12, dpi = 300, limitsize = FALSE)
+  markers <- ct_marker_map[[ct]]
+  if (is.null(markers)) {
+    cat(sprintf("[%s] no matching curated marker list — skipping RPCA/DE\n", ct))
+    next
+  }
+
+  rpca_ok <- "umap.rpca" %in% Reductions(sub_srt)
+  if (!rpca_ok) {
+    cat(sprintf("[%s] RPCA integration...\n", ct))
+    sub_srt[["Spatial"]] <- split(sub_srt[["Spatial"]], f = sub_srt$slide)
+    DefaultAssay(sub_srt) <- "Spatial"
+    sub_srt <- NormalizeData(sub_srt)
+    sub_srt <- FindVariableFeatures(sub_srt)
+    sub_srt <- ScaleData(sub_srt)
+    sub_srt <- RunPCA(sub_srt)
+    # IntegrateLayers can error if the actual anchor count (found internally,
+    # governed by k.anchor / shared nearest neighbours) falls below k.weight
+    # for a small slide; retry with progressively smaller k.weight.
+    kw_max <- min(50, min(table(sub_srt$slide)))
+    for (kw in unique(pmin(kw_max, c(50, 30, 20, 15, 10, 5)))) {
+      integrated <- tryCatch(
+        IntegrateLayers(object = sub_srt, method = RPCAIntegration, orig.reduction = "pca",
+          new.reduction = "integrated.rpca", verbose = FALSE, k.weight = kw),
+        error = function(e) {
+          message(sprintf("  [%s] IntegrateLayers failed at k.weight=%d: %s", ct, kw, conditionMessage(e)))
+          NULL
+        })
+      if (!is.null(integrated)) { sub_srt <- integrated; rpca_ok <- TRUE; break }
+    }
+    if (rpca_ok) {
+      sub_srt <- FindNeighbors(sub_srt, reduction = "integrated.rpca", dims = 1:30)
+      sub_srt <- FindClusters(sub_srt, resolution = 1, cluster.name = "rpca_clusters")
+      sub_srt <- RunUMAP(sub_srt, reduction = "integrated.rpca", dims = 1:30, reduction.name = "umap.rpca")
+      qs_save(sub_srt, ct_path)
+    } else {
+      cat(sprintf("[%s] RPCA integration failed at all k.weight values — skipping rpca DE\n", ct))
+    }
+  }
+
+  ct_dir <- file.path(subtype_dir, ct_safe)
+  dir.create(ct_dir, showWarnings = FALSE, recursive = TRUE)
+
+  de_rds_rpca <- file.path(ct_dir, sprintf("%s_deg_subcluster_rpca.Rds", ct_safe))
+  if (!rpca_ok) {
+    cat(sprintf("[%s] no RPCA integration — skipping rpca DE\n", ct))
+  } else if (file.exists(de_rds_rpca)) {
+    cat(sprintf("[%s] MAST DE (rpca) already cached\n", ct))
+  } else {
+    Idents(sub_srt) <- "rpca_clusters"
+    cat(sprintf("[%s] MAST DE between %d rpca subclusters...\n", ct, dplyr::n_distinct(Idents(sub_srt))))
+    DE <- tryCatch(
+      FindAllMarkers(sub_srt, assay = "SCT", test.use = "MAST",
+                     only.pos = TRUE, verbose = FALSE),
+      error = function(e) { message(sprintf("  FindAllMarkers failed for %s: %s", ct, conditionMessage(e))); NULL })
+    if (!is.null(DE) && nrow(DE) > 0) {
+      print(head(DE))
+      saveRDS(DE, de_rds_rpca)
+      write.csv(DE, file.path(ct_dir, sprintf("%s_deg_subcluster_rpca.csv", ct_safe)),
+                row.names = FALSE)
+    }
+  }
+
+  if (dplyr::n_distinct(sub_srt$pearson_clusters_batch) < 2) {
+    cat(sprintf("[%s] fewer than 2 pearson subclusters — skipping pearson DE\n", ct))
+    next
+  }
+
+  de_rds_pearson <- file.path(ct_dir, sprintf("%s_deg_subcluster.Rds", ct_safe))
+  if (file.exists(de_rds_pearson)) {
+    cat(sprintf("[%s] MAST DE (pearson) already cached\n", ct))
+  } else {
+    Idents(sub_srt) <- "pearson_clusters_batch"
+    cat(sprintf("[%s] MAST DE between %d pearson subclusters...\n", ct, dplyr::n_distinct(Idents(sub_srt))))
+    DE <- tryCatch(
+      FindAllMarkers(sub_srt, assay = "SCT", test.use = "MAST",
+                     only.pos = TRUE, verbose = FALSE),
+      error = function(e) { message(sprintf("  FindAllMarkers failed for %s: %s", ct, conditionMessage(e))); NULL })
+    if (!is.null(DE) && nrow(DE) > 0) {
+      print(head(DE))
+      saveRDS(DE, de_rds_pearson)
+      write.csv(DE, file.path(ct_dir, sprintf("%s_deg_subcluster.csv", ct_safe)),
+                row.names = FALSE)
+    }
+  }
 }
 
-# ── 6. Per-subtype MAST DE + curated marker DotPlot ───────────────────────────
-# Reuses the cached reclustering from Section 5 (already carries
-# `pearson_clusters_batch`), runs MAST DE between those subclusters, and draws
-# a DotPlot against the cell type's matching curated marker list (as opposed
-# to the flat `all_marker` purity check above).
-ct_marker_map <- list(
-  "B cells"       = bcell_marker,
-  "Plasma"        = bcell_marker,
-  "Macrophages"   = macro_marker,
-  "Epithelial"    = epi_marker,
-  "SVEC"          = epi_marker,        # Seminal Vesicle Epithelial Cell
-  "CAF"           = fibro_marker,
-  "Smooth muscle" = fibro_marker,
-  "Pericyte"      = endo_marker,
-  "Neurons"       = list(Neuron = Neuron_feature)
-)
-
-subtype_out_dir <- path.expand("~/VisHD/8.5.normal_cell_subtypes")
-dir.create(subtype_out_dir, showWarnings = FALSE, recursive = TRUE)
-
+# ── 6. Per-subtype visualization ──────────────────────────────────────────────
+# Reads back the cache Section 5 built: all-marker FeaturePlot (purity check)
+# plus, for cell types with a curated marker list, RPCA and pearson_clusters_batch
+# DimPlot/VlnPlot/DotPlot against that cell type's markers.
 for (ct in celltypes) {
   ct_safe <- gsub("[^A-Za-z0-9]+", "_", ct)
   ct_path <- file.path(subtype_dir, paste0(ct_safe, "_recluster_srt.qs2"))
@@ -287,47 +469,85 @@ for (ct in celltypes) {
     cat(sprintf("[%s] skipped — no cached reclustering (too few cells)\n", ct))
     next
   }
-  markers <- ct_marker_map[[ct]]
-  if (is.null(markers)) {
-    cat(sprintf("[%s] skipped — no matching marker list\n", ct))
-    next
-  }
-
-  ct_dir <- file.path(subtype_out_dir, ct_safe)
-  dir.create(ct_dir, showWarnings = FALSE, recursive = TRUE)
-
   sub_srt <- qs_read(ct_path)
-  Idents(sub_srt) <- "pearson_clusters_batch"
-  if (dplyr::n_distinct(Idents(sub_srt)) < 2) {
-    cat(sprintf("[%s] skipped — fewer than 2 subclusters\n", ct))
+
+  fp <- FeaturePlot(sub_srt, names(marker_list), reduction = "pearsonbatchumap",
+                    cols = c("white", "red"), order = TRUE) +
+    plot_layout(ncol = 4)
+  ggsave(file.path(marker_viz_dir, paste0(ct_safe, "_all_marker_scores.png")),
+         fp, width = 16, height = 12, dpi = 300, limitsize = FALSE)
+
+  markers <- ct_marker_map[[ct]]
+  if (is.null(markers) || !"umap.rpca" %in% Reductions(sub_srt)) {
+    cat(sprintf("[%s] no RPCA integration cached — skipping subtype plots\n", ct))
     next
   }
+  ct_dir <- file.path(subtype_dir, ct_safe)
 
-  cat(sprintf("[%s] MAST DE between %d subclusters...\n", ct, dplyr::n_distinct(Idents(sub_srt))))
-  DE <- tryCatch(
-    FindAllMarkers(sub_srt, assay = "Spatial", test.use = "MAST",
-                   only.pos = TRUE, verbose = FALSE),
-    error = function(e) { message(sprintf("  FindAllMarkers failed for %s: %s", ct, conditionMessage(e))); NULL })
-  if (!is.null(DE) && nrow(DE) > 0) {
-    saveRDS(DE, file.path(ct_dir, sprintf("%s_deg_subcluster.Rds", ct_safe)))
-    write.csv(DE, file.path(ct_dir, sprintf("%s_deg_subcluster.csv", ct_safe)),
-              row.names = FALSE)
-  }
+  dp_sub <- DimPlot(sub_srt, reduction = "umap.rpca",
+                    group.by = "rpca_clusters", label = TRUE,
+                    repel = TRUE, cols = as.vector(polychrome())) +
+    ggtitle(sprintf("%s — RPCA DimPlot", ct))
+  dp_sub2 <- DimPlot(sub_srt, reduction = "umap.rpca",
+                    group.by = "slide", label = TRUE,
+                    repel = TRUE, cols = as.vector(polychrome()))
+  ggsave(file.path(ct_dir, sprintf("%s_DimPlot_rpca.png", ct_safe)),
+         dp_sub+dp_sub2, width = 10, height = 4, dpi = 300, bg = "white")
+
+  vln <- VlnPlot(sub_srt, features = "nCount_Spatial", group.by = "rpca_clusters") +
+    ggtitle(sprintf("%s — nCount_Spatial per subcluster", ct)) +
+    NoLegend()
+  ggsave(file.path(ct_dir, sprintf("%s_nCount_vlnplot_rpca.png", ct_safe)),
+         vln, width = 6, height = 4, dpi = 300, bg = "white")
 
   feats <- lapply(markers, function(g) intersect(g, rownames(sub_srt)))
   feats <- feats[lengths(feats) > 0]
   if (!length(feats)) {
-    cat(sprintf("[%s] no marker genes present — skipping DotPlot\n", ct))
+    cat(sprintf("[%s] no marker genes present — skipping DotPlots\n", ct))
     next
   }
+
+  Idents(sub_srt) <- "rpca_clusters"
+  dp <- DotPlot(sub_srt, features = feats, group.by = "rpca_clusters",
+               assay = "SCT") +
+    ggtitle(sprintf("%s — marker expression per RPCA subcluster", ct)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_colour_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0)
+  ggsave(file.path(ct_dir, sprintf("%s_marker_dotplot_rpca.png", ct_safe)),
+         dp, height = 5, width = max(4, length(unlist(feats)) * 0.25 + 2),
+         dpi = 300, limitsize = FALSE, bg = "white")
+
+  if (dplyr::n_distinct(sub_srt$pearson_clusters_batch) < 2) {
+    cat(sprintf("[%s] fewer than 2 pearson subclusters — skipping pearson plots\n", ct))
+    next
+  }
+
+  vln <- VlnPlot(sub_srt, features = "nCount_Spatial", group.by = "pearson_clusters_batch") +
+    ggtitle(sprintf("%s — nCount_Spatial per subcluster", ct)) +
+    NoLegend()
+  ggsave(file.path(ct_dir, sprintf("%s_nCount_vlnplot_pearson.png", ct_safe)),
+         vln, width = 6, height = 4, dpi = 300, bg = "white")
+
+  dp_sub <- DimPlot(sub_srt, reduction = "pearsonbatchumap",
+                    group.by = "pearson_clusters_batch", label = TRUE,
+                    repel = TRUE, cols = as.vector(polychrome())) +
+    ggtitle(sprintf("%s — pearson batch-corrected DimPlot", ct))
+  dp_sub2 <- DimPlot(sub_srt, reduction = "pearsonbatchumap",
+                    group.by = "slide", label = TRUE,
+                    repel = TRUE, cols = as.vector(polychrome()))
+  ggsave(file.path(ct_dir, sprintf("%s_DimPlot_pearson.png", ct_safe)),
+         dp_sub+dp_sub2, width = 10, height = 4, dpi = 300, bg = "white")
+
+  Idents(sub_srt) <- "pearson_clusters_batch"
   dp <- DotPlot(sub_srt, features = feats, group.by = "pearson_clusters_batch",
-               assay = "Spatial") +
-    coord_flip() +
+               assay = "SCT") +
     ggtitle(sprintf("%s — marker expression per subcluster", ct)) +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_colour_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0)
   ggsave(file.path(ct_dir, sprintf("%s_marker_dotplot.png", ct_safe)),
-         dp, width = 8, height = max(4, length(unlist(feats)) * 0.25 + 2),
-         dpi = 300, limitsize = FALSE)
+         dp, height = 5, width = max(4, length(unlist(feats)) * 0.25 + 2),
+         dpi = 300, limitsize = FALSE, bg = "white")
 }
 
 cat("\nDone. Outputs in", viz_dir, "and", subtype_out_dir, "\n")
+cat("Run 8.5.2.general_layer_analysis.R next for the general_layer pipeline.\n")

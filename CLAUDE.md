@@ -63,8 +63,8 @@ tumour/normal splits before processing.
 > `4.4.integrate_tumour_anno_srt.R` → `4.4.integrate_tumour_anno/`). The legacy binned
 > track and the old `7.1.integration_cells.R` (hardcoded-cluster split) were retired to
 > `bin/`, and stages 8–11 were cascaded down one to fill the gap. Paths below are the
-> real on-disk dir names. Exceptions that keep their name: `6.2archetype_downstream_tumour/`
-> and `9.normalcell_annotation/` (external SCimilarity-hint step, no numbered writer).
+> real on-disk dir names. Exception that keeps its name: `9.normalcell_annotation/`
+> (external SCimilarity-hint step, no numbered writer).
 
 **Script roles + I/O (read → write):**
 
@@ -80,7 +80,7 @@ tumour/normal splits before processing.
 | `5.3.integrate_DESeq2_deg.R` | run-once | per-sample `tumour/tumour_srt.qs2` | `5.3.DESeq2_results/` (pseudobulk DESeq2) |
 | `5.4.tumour_expression_proportion.R` | run-once | `tumour/tumour_srt.qs2` + 5.3 results | `5.4.expression_proportion/` |
 | `6.1.archetypal_analysis_tumour.ipynb` | per-sample (1-8, `SAMPLE_IDX`) | `tumour/tumour.h5ad` | `tumour/archetype_result/` |
-| `6.2.archetype_downstream.R` | run-once | per-sample `archetype_result/` | `6.2archetype_downstream_tumour/` |
+| `6.2.archetype_downstream.R` | run-once | per-sample `archetype_result/` | `6.2.archetype_downstream_tumour/` |
 | `6.3.archetype_module.r` | run-once | 6.2 downstream outputs | archetype/`groupdeg` module gene sets |
 | `6.4.signature_analysis.R` | run-once | `tumour/tumour_srt.qs2` + 6.3 groupdeg | `6.4.signature_analysis/` |
 | `6.5.integrate_tumour_archetype.ipynb` | run-once | `4.4.../integrated_tumour_anno.h5ad` | `6.5.integrate_tumour_archetype/` |

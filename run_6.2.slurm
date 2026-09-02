@@ -1,9 +1,9 @@
 #!/bin/bash -l
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=150G
-#SBATCH --time=3:00:00
+#SBATCH --time=5:00:00
 #SBATCH --job-name=archetype_downstream
 #SBATCH --output="slurmout/6.2.archetype_downstream-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
@@ -31,4 +31,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/6.2.archetype_downstream.R
+  Rscript ~/VisHD/6.2.DT_archetype_downstream.R

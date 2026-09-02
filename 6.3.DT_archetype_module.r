@@ -1,4 +1,14 @@
 
+# 6.3.DT_archetype_module.r
+# DT-only counterpart of 6.3.archetype_module.r. Same derive-groupgene /
+# correlation-filter workflow, but sourced from the 6.2.DT_archetype_downstream.R
+# outputs (archetypes fit on category == "DT" cells only):
+#   - archetype_expression.csv from 6.1.DT_archetype/{sample}/
+#   - archetype_group_DE_MAST.Rds from 6.2.archetype_downstream_tumour_DT/
+#   - per-sample DT_srt.qs2 (already SpaNorm-normalised on the DT subset, with
+#     archetype metadata) from 6.2.archetype_downstream_tumour_DT/DT_srt/
+# Output: VisHD/6.3.DT_archetype_module/
+
 suppressPackageStartupMessages({
   library(tidyverse)
   library(ComplexHeatmap)
@@ -8,18 +18,18 @@ suppressPackageStartupMessages({
   library(qs2)
 })
 library(dendextend, lib.loc = "~/R_Library/4.5")
-
+source("functions.R")
 # ── Config ────────────────────────────────────────────────────────────────────
 samples <- c("LUT-245-07", "LUT-245-09", "LUT-245-10", "LUT-245-11",
              "LUT-245-15", "LUT-245-16", "LUT-245-17", "LUT-245-20")
 
 base_dir <- "~/VisHD"
-outdir   <- file.path(base_dir, "6.3.archetype_module")
+outdir   <- file.path(base_dir, "6.3.DT_archetype_module")
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
 # ── DEG markers ───────────────────────────────────────────────────────────────
 markerlist <- readRDS(file.path(base_dir,
-  "6.2.archetype_downstream_tumour/archetype_group_DE_MAST.Rds"))
+  "6.2.archetype_downstream_tumour_DT", "archetype_group_DE_MAST.Rds"))
 markers <- bind_rows(markerlist, .id = "sample")
 markers$cluster    <- sub("^Archetype_", "A", markers$cluster)
 markers$arch_group <- paste(markers$sample, markers$cluster, sep = "_")
@@ -27,7 +37,7 @@ markers$arch_group <- paste(markers$sample, markers$cluster, sep = "_")
 # ── Per-archetype-group gene sets (significant, up, expression-enriched) ───────
 arch_expr_list <- list()
 for (s in samples) {
-  expr_f <- file.path(base_dir, s, "tumour", "archetype_result", "archetype_expression.csv")
+  expr_f <- file.path(base_dir, "6.1.DT_archetype", s, "archetype_expression.csv")
   if (!file.exists(expr_f)) {
     message("Skipping ", s, " — missing archetype_expression.csv")
     next
@@ -103,7 +113,7 @@ png(file.path(outdir, "overlap_heatmap.png"), width = 1400, height = 1200, res =
 draw(Heatmap(mat, name = "overlap"))
 dev.off()
 
-res       <- derive_groupgene(arch_group_gene, mat, k = 6, cutoff = 0.3,
+res       <- derive_groupgene(arch_group_gene, mat, k = 4, cutoff = 0.4,
                               split_file = file.path(outdir, "group_split_heatmap.png"))
 groupgene <- res$groupgene
 
@@ -112,9 +122,10 @@ message(length(shared_before), " genes shared across groups before cleaning")
 
 groupgene <- make_exclusive(groupgene, res$group, markers)
 stopifnot(length(names(which(table(unlist(groupgene)) > 1))) == 0)
+# groupgene <- groupgene[lengths(groupgene) >= 10]   # drop groups with < 10 genes
 message("groups after cleaning: ", paste(names(groupgene), collapse = ", "),
         " (", paste(lengths(groupgene), collapse = ", "), " genes)")
-groupgene <- groupgene[lengths(groupgene) >= 10]   # drop groups with < 10 genes
+
 
 # ── Second round: co-expression correlation filter ─────────────────────────────
 # Correlate the (normalised) per-cell expression of every group gene within each
@@ -129,7 +140,8 @@ all_gg_genes <- unique(unlist(groupgene, use.names = FALSE))
 
 cor_list <- list()
 for (s in samples) {
-  srt_f <- file.path(base_dir, s, "tumour", "tumour_srt.qs2")
+  srt_f <- file.path(base_dir, "6.2.archetype_downstream_tumour_DT", "DT_srt",
+                     sprintf("%s_DT_srt.qs2", s))
   if (!file.exists(srt_f)) next
   message("Correlating group genes for ", s, " ...")
   srt <- qs_read(srt_f)
@@ -189,7 +201,7 @@ for (s in names(cor_list))
                    file.path(persample_dir, sprintf("groupgene_correlation_%s.png", s)),
                    paste0("Group-gene correlation — ", s))
 
-# (3) cut the filter+merge heatmap's row dendrogram into 4 final correlation groups
+# (3) cut the filter+merge heatmap's row dendrogram into 3 final correlation groups
 gene_cl <- cutree(as.hclust(row_dend(ht_bf)), k = 4)
 groupgene <- setNames(split(names(gene_cl), gene_cl),
                       paste0("G", seq_len(length(unique(gene_cl)))))
@@ -202,7 +214,7 @@ groupgene <- setNames(lapply(names(groupgene), function(grp) {
   sub <- cor_avg[gs, gs]; diag(sub) <- NA
   gs[rowMeans(sub, na.rm = TRUE) >= cor_cutoff]
 }), names(groupgene))
-groupgene <- groupgene[lengths(groupgene) >= 10]
+
 message("after gene filter: ", paste(names(groupgene), collapse = ", "),
         " (", paste(lengths(groupgene), collapse = ", "), " genes)")
 
@@ -229,7 +241,7 @@ ht_fm <- plot_cor_heatmap(groupgene, cor_avg,
                  file.path(outdir, "groupgene_correlation_after.png"),
                  "Group-gene correlation (after filter + merge)")
 
-# (3) cut the filter+merge heatmap's row dendrogram into 4 final correlation groups
+# (3) cut the filter+merge heatmap's row dendrogram into 5 final correlation groups
 gene_cl <- cutree(as.hclust(row_dend(ht_fm)), k = 5)
 groupgene <- setNames(split(names(gene_cl), gene_cl),
                       paste0("G", seq_len(length(unique(gene_cl)))))
@@ -239,13 +251,10 @@ plot_cor_heatmap(groupgene, cor_avg,
                  file.path(outdir, "groupgene_correlation_5groups.png"),
                  "Group-gene correlation (5 groups)")
 
-# manual curation: drop G1, merge G3 + G4, then renumber groups in order
-groupgene$G3 <- unique(c(groupgene$G3, groupgene$G4))
-groupgene$G1 <- NULL
-groupgene$G4 <- NULL
-groupgene <- setNames(groupgene, paste0("G", seq_along(groupgene)))
-message("after curation: ", paste(names(groupgene), collapse = ", "),
-        " (", paste(lengths(groupgene), collapse = ", "), " genes)")
+# NOTE: manual curation step from 6.3.archetype_module.r (drop/merge specific
+# G-clusters) was tuned to that script's dendrogram and is NOT reapplied here —
+# inspect groupgene_correlation_6groups.png and adjust group membership by hand
+# before trusting downstream results if curation is warranted.
 
 plot_cor_heatmap(groupgene, cor_avg,
                  file.path(outdir, "groupgene_correlation_final.png"),
@@ -261,9 +270,9 @@ write.csv(gg_df, file.path(outdir, "groupgene.csv"), row.names = FALSE)
 
 # ── Visualization: groupgene module scores across all 8 samples ────────────────
 # AddModuleScore each (now exclusive) group's genes per sample, then render
-# FeaturePlot (UMAP) and the spatial map. These tumour_srt.qs2 are FOV-based
-# Visium HD objects → SpatialFeaturePlot has no compatible image, so the spatial
-# panel uses ImageFeaturePlot (the FOV equivalent used elsewhere in 6.2.1).
+# FeaturePlot (UMAP) and the spatial map. DT_srt.qs2 are FOV-based Visium HD
+# objects → SpatialFeaturePlot has no compatible image, so the spatial panel
+# uses ImageFeaturePlot (the FOV equivalent used elsewhere in 6.2.1).
 suppressPackageStartupMessages({
   library(Seurat)
   library(SeuratObject)
@@ -290,8 +299,9 @@ dim_plots  <- setNames(vector("list", length(groupgene)), module_names)  # UMAP 
 score_list <- list()                                                     # per-cell module scores
 
 for (s in samples) {
-  srt_f <- file.path(base_dir, s, "tumour", "tumour_srt.qs2")
-  if (!file.exists(srt_f)) { message("Skipping ", s, " — missing tumour_srt.qs2"); next }
+  srt_f <- file.path(base_dir, "6.2.archetype_downstream_tumour_DT", "DT_srt",
+                     sprintf("%s_DT_srt.qs2", s))
+  if (!file.exists(srt_f)) { message("Skipping ", s, " — missing DT_srt.qs2"); next }
   message("Scoring groupgene modules for ", s, " ...")
   srt <- qs_read(srt_f)
 
@@ -317,7 +327,9 @@ for (s in samples) {
   s_dir <- file.path(deg_dir, "per_sample", s)            # per-sample DEG + enrichment
   dir.create(s_dir, showWarnings = FALSE, recursive = TRUE)
 
-  red <- grep("pearsonumap", Reductions(srt), ignore.case = TRUE, value = TRUE)[1]
+  # DT_srt.qs2 was normalised/clustered by do.spanorm_dt() (RunUMAP default
+  # reduction name "umap"), not the cross-sample "pearsonumap" used elsewhere.
+  red <- grep("umap", Reductions(srt), ignore.case = TRUE, value = TRUE)[1]
   for (m in module_names[keep]) {
     mid <- median(srt@meta.data[[m]], na.rm = TRUE)          # centre scale on module-score median
     if (!is.na(red))
@@ -412,10 +424,10 @@ if (length(score_list) > 0) {
 message("\nDone. Module-score figures + scores saved to ", vizdir,
         " (per-sample DEG + enrichment under ", file.path(deg_dir, "per_sample"), ")")
 
-# ── Cross-sample summary heatmaps: per-GGmod avg_log2FC + enrichment NES ────────
-# From the per-sample DEG (module-gene avg_log2FC) and GSEA NES collected in the
-# scoring loop above, draw one heatmap per GGmod group: genes / pathways in rows,
-# samples in columns. Colour scale steelblue–white–indianred (low/0/high).
+# ── Cross-sample summary heatmaps: per-GGmod avg_log2FC ─────────────────────────
+# From the per-sample DEG (module-gene avg_log2FC) collected in the scoring loop
+# above, draw one heatmap per GGmod group: genes in rows, samples in columns.
+# Colour scale steelblue–white–indianred (low/0/high).
 ps_dir   <- file.path(deg_dir, "per_sample")
 summ_dir <- file.path(deg_dir, "cross_sample_summary")
 dir.create(summ_dir, showWarnings = FALSE, recursive = TRUE)
@@ -442,8 +454,8 @@ save_hm <- function(m, file, title, legend, k = 1) {
   h <- min(30000, max(500, nrow(m) * 16 + 220))
   png(file, width = w, height = h, res = 150)
   ht <- draw(Heatmap(m, name = legend, col = hm_col, column_title = title, na_col = "grey90",
-                show_row_names = show_rn, column_split = grp, border = TRUE, row_split = k, 
-                 row_gap = unit(5, "mm"), column_gap = unit(5, "mm"), 
+                show_row_names = show_rn, column_split = grp, border = TRUE, row_split = k,
+                 row_gap = unit(5, "mm"), column_gap = unit(5, "mm"),
                row_names_gp = gpar(fontsize = 6), column_names_gp = gpar(fontsize = 8)))
   dev.off()
   return(ht)
@@ -451,7 +463,7 @@ save_hm <- function(m, file, title, legend, k = 1) {
 
 mat_list <- list()
 for (grp in names(groupgene)) {
-  # (1) avg_log2FC of this module's defining genes (top-30% module cells vs rest)
+  # avg_log2FC of this module's defining genes (top-30% module cells vs rest)
   l2f <- setNames(lapply(samples, function(s) {
     f <- file.path(ps_dir, s, sprintf("DEG_MAST_%s_vs_rest.csv", grp))
     if (!file.exists(f)) return(numeric(0))
@@ -463,29 +475,6 @@ for (grp in names(groupgene)) {
   mat <- build_mat(l2f)
   colnames(mat) <- paste(colnames(mat), grp, sep = "_")
   mat_list[[grp]] <- mat
-
-  # # (2) GSEA NES per collection; keep pathways significant (p.adjust < 0.05) in >= 1 sample
-  # for (nm in c("Hallmark", "C6", "C5")) {
-  #   tabs <- setNames(lapply(samples, function(s) {
-  #     f <- file.path(ps_dir, s, sprintf("enrich_%s_%s.csv", grp, nm))
-  #     if (!file.exists(f)) return(NULL)
-  #     d <- read.csv(f)
-  #     if (nrow(d) == 0) NULL else d
-  #   }), samples)
-  #   nes <- lapply(tabs, function(d) if (is.null(d)) numeric(0) else setNames(d$NES, d$ID))
-  #   m <- build_mat(nes)
-  #   if (is.null(m)) next
-  #   sig_ids <- unique(unlist(lapply(tabs, function(d)
-  #     if (is.null(d)) character(0) else d$ID[!is.na(d$p.adjust) & d$p.adjust < 0.05])))
-  #   m <- m[rownames(m) %in% sig_ids, , drop = FALSE]
-  #   if (nrow(m) < 2) next
-  #   if (nrow(m) > 50) {                       # cap to most-recurrent / strongest pathways
-  #     ord <- order(rowSums(!is.na(m)), rowMeans(abs(m), na.rm = TRUE), decreasing = TRUE)
-  #     m <- m[ord[seq_len(50)], , drop = FALSE]
-  #   }
-  #   save_hm(m, file.path(summ_dir, sprintf("enrichNES_%s_%s.png", grp, nm)),
-  #           paste0(grp, " — ", nm, " GSEA NES (sig in >= 1 sample)"), "NES")
-  # }
 }
 
 # cbind all per-group matrices on the union of genes; absent gene/sample → 0
@@ -501,24 +490,28 @@ mat <- mat[apply(mat, 1, function(x) sum(x != 0))>10, ]
 
 ht <- save_hm(mat, file.path(summ_dir, "avglogFC_all_groups.png"),
         "Module-gene avg_log2FC (top-30% cells vs rest, sig p_adj<0.05)", "avg_log2FC", k = 15)
+
+message("\nDone. Cross-sample avg_log2FC heatmap saved to ", summ_dir,
+        " (inspect the row dendrogram to hand-pick a groupdeg selection, as done",
+        " via extract_group_genes() in 6.3.archetype_module.r, if a curated",
+        " groupdeg module-score visualisation is wanted downstream)")
+
+
 hc <- row_dend(ht)
 extract_group_genes <- function(dend, idx_list){
   lapply(idx_list, function(x){
     unlist(sapply(x, function(y) labels(dend[[y]])))
   })
 }
-groupdeg <- extract_group_genes(hc, list(c(1, 3), c(6, 7, 8, 10, 11), c(2, 4, 13, 14)))
-names(groupdeg) <- c("G3", "G2", "G1")
-groupdeg <- setNames(lapply(names(groupdeg), function(grp){
-  gen1 <- groupdeg[[grp]]
-  submat <- mat_list[[grp]]
-  gen2 <- rownames(submat[complete.cases(submat), , drop = F])
-  intersect(gen1, gen2)
-}), names(groupdeg))
+
+groupdeg <- extract_group_genes(hc, list(c(12, 13), c(1, 4, 5), c(6, 14, 15), c(7, 9), c(10, 11)))
+names(groupdeg) <- c( "DT_G5", "DT_G4", "DT_G3", "DT_G2", "DT_G1")
+
+
 
 saveRDS(groupdeg, file.path(summ_dir, "groupdeg.rds"))
 ht2 <- save_hm(mat[unlist(groupdeg), ], file.path(summ_dir, "avglogFC_all_groups_selected.png"),
-        "Selected DEGs for group genes", "avg_log2FC", k = 3)
+        "Selected DEGs for group genes", "avg_log2FC", k = 5)
 
 rowdend <- row_dend(ht2)
 lapply(rowdend, function(x) labels(x))
@@ -568,10 +561,8 @@ for (s in samples) {
       deg_feat_plots[[m]][[s]] <- FeaturePlot(srt, features = m, reduction = red, order = TRUE) +
         scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred", midpoint = mid) +
         ggtitle(paste0(s, "  ", m)) + theme(plot.title = element_text(size = 8))
-    deg_sp_plots[[m]][[s]] <- ImageFeaturePlot(srt, features = m, size = 0.4) +
-      scale_fill_gradient2(low = "steelblue", mid = "white", high = "indianred", midpoint = mid) +
-      scale_color_gradient2(low = "steelblue", mid = "white", high = "indianred", midpoint = mid) +
-      ggtitle(paste0(s, "  ", m)) + theme(plot.title = element_text(size = 8))
+    deg_sp_plots[[m]][[s]] <- dark_feature_plot(srt, features = m, size = 0.4) +
+      ggtitle(paste0(s, "  ", m))
   }
   rm(srt); gc()
 }
@@ -593,6 +584,6 @@ if (any(lengths(deg_feat_plots) > 0))
          width = grid_w, height = grid_h, dpi = 150, limitsize = FALSE)
 if (any(lengths(deg_sp_plots) > 0))
   ggsave(file.path(summ_dir, "groupdeg_spatial_all.png"), build_grid_deg(deg_sp_plots),
-         width = grid_w, height = grid_h, dpi = 150, limitsize = FALSE)
+         width = grid_w, height = grid_h, dpi = 400, limitsize = FALSE, bg = "black")
 
 message("\nDone. groupdeg module-score figures saved to ", summ_dir)

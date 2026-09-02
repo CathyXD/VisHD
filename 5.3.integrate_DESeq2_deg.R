@@ -197,15 +197,20 @@ ggsave(file.path(png_dir, "1_PCA_pseudobulk.png"),
 p_vol <- res_df %>%
   filter(!is.na(pvalue)) %>%
   mutate(
-    sig   = !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 0.5,
-    label = ifelse(sig & rank(-abs(log2FoldChange)) <= 30, gene, NA_character_)
+    sig       = !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 1.25,
+    direction = case_when(
+      sig & log2FoldChange > 0 ~ "Up",
+      sig & log2FoldChange < 0 ~ "Down",
+      TRUE ~ "NS"
+    ),
+    label = ifelse(sig, gene, NA_character_)
   ) %>%
   ggplot(aes(log2FoldChange, -log10(pvalue + 1e-300),
-             colour = sig, label = label)) +
+             colour = direction, label = label)) +
   geom_point(size = 0.8, alpha = 0.7) +
   geom_text_repel(size = 2.5, max.overlaps = 25, na.rm = TRUE) +
-  scale_colour_manual(values = c("grey70", "firebrick")) +
-  geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", colour = "grey40") +
+  scale_colour_manual(values = c(NS = "grey70", Up = "firebrick", Down = "royalblue")) +
+  geom_vline(xintercept = c(-1.25, 1.25), linetype = "dashed", colour = "grey40") +
   geom_hline(yintercept = -log10(0.05), linetype = "dashed", colour = "grey40") +
   labs(title = "DT vs CB — pseudobulk DESeq2 (all samples)",
        subtitle = paste0(n_sig, " DEGs  |  positive = DT"),
@@ -232,10 +237,10 @@ ggsave(file.path(png_dir, "3_MA_plot.png"),
        p_ma, width = 6, height = 4, dpi = 200)
 
 # 5d. Heatmap of top DEGs (VST z-scores)
-top_genes <- res_df %>%
-  filter(!is.na(padj), padj < 0.05, abs(log2FoldChange) > 0.5) %>%
-  slice_min(padj, n = 60) %>%
-  pull(gene)
+sig_genes <- res_df %>% filter(!is.na(padj), padj < 0.05) %>% mutate(score = abs(log2FoldChange) / padj)
+top_up    <- sig_genes %>% filter(log2FoldChange > 0) %>% slice_max(score, n = 30)
+top_down  <- sig_genes %>% filter(log2FoldChange < 0) %>% slice_max(score, n = 30)
+top_genes <- bind_rows(top_up, top_down) %>% pull(gene)
 
 if (length(top_genes) >= 5) {
   mat_hm <- assay(vsd)[top_genes, , drop = FALSE]
@@ -462,6 +467,347 @@ for (coll_nm in names(gsea_collections)) {
       ncol(nes_plot), "samples\n")
 }
 
+# ── 8b. Sample-only pseudobulk session ───────────────────────────────────────
+# Same paired DT-vs-CB DESeq2 + full visualization suite as sections 3–8, but
+# pseudobulk unit = sample x category (subclones pooled together instead of
+# kept separate). Design: ~sample_id + category_bin.
+paired_sample_dir <- file.path(outdir, "paired_sample")
+png_dir_s <- file.path(paired_sample_dir, "png")
+dir.create(png_dir_s, showWarnings = FALSE, recursive = TRUE)
+
+group_ids_s     <- setNames(paste0(meta$sample_id, "__", meta$category_bin), valid_cells)
+unique_groups_s <- unique(group_ids_s)
+
+pb_counts_s <- vapply(unique_groups_s, function(g) {
+  cells_g <- names(group_ids_s)[group_ids_s == g]
+  Matrix::rowSums(counts_raw[, cells_g, drop = FALSE])
+}, numeric(nrow(counts_raw)))
+
+pb_meta_s <- data.frame(
+  group        = unique_groups_s,
+  sample_id    = sub("__.*", "", unique_groups_s),
+  category_bin = sub(".*__", "", unique_groups_s),
+  n_cells      = as.integer(table(group_ids_s)[unique_groups_s]),
+  row.names    = unique_groups_s,
+  stringsAsFactors = FALSE
+)
+pb_meta_s <- pb_meta_s %>% filter(n_cells >= min_cells)
+
+# Paired subset: keep only samples with BOTH DT and CB present (>=min_cells)
+paired_s    <- names(which(table(pb_meta_s$sample_id) == 2))
+pb_meta_s   <- pb_meta_s %>% filter(sample_id %in% paired_s)
+pb_counts_s <- pb_counts_s[, rownames(pb_meta_s), drop = FALSE]
+cat(nrow(pb_meta_s), " paired sample-level pseudobulks (", length(paired_s), " samples)\n", sep = "")
+
+if (nrow(pb_meta_s) < 4) {
+  cat("Too few sample-level pseudobulks for DESeq2 — skipping sample-only session.\n")
+} else {
+  keep_genes_s <- rowSums(pb_counts_s >= 10) >= max(2, floor(nrow(pb_meta_s) / 5))
+  pb_counts_s  <- pb_counts_s[keep_genes_s, ]
+  cat(sum(keep_genes_s), "genes retained after count filtering (sample-level)\n")
+
+  pb_meta_s$category_bin <- factor(pb_meta_s$category_bin, levels = c("CB", "DT"))
+  pb_meta_s$sample_id    <- factor(pb_meta_s$sample_id)
+
+  dds_s <- DESeqDataSetFromMatrix(
+    countData = as.matrix(pb_counts_s),
+    colData   = pb_meta_s,
+    design    = ~sample_id + category_bin
+  )
+  dds_s <- DESeq(dds_s, parallel = FALSE)
+  cat("DESeq2 done (sample-level)\n")
+
+  res_s    <- results(dds_s, contrast = c("category_bin", "DT", "CB"), alpha = 0.05)
+  res_s_df <- as.data.frame(res_s) %>%
+    rownames_to_column("gene") %>%
+    arrange(padj)
+
+  saveRDS(dds_s,    file.path(paired_sample_dir, "deseq2_dds.Rds"))
+  saveRDS(res_s_df, file.path(paired_sample_dir, "deseq2_res_DT_vs_CB.Rds"))
+  write.csv(res_s_df, file.path(paired_sample_dir, "deseq2_res_DT_vs_CB.csv"), row.names = FALSE)
+
+  n_sig_s <- sum(!is.na(res_s_df$padj) & res_s_df$padj < 0.05 & abs(res_s_df$log2FoldChange) > 0.5)
+  cat("Significant DEGs (padj<0.05, |lfc|>0.5), sample-level:", n_sig_s, "\n")
+
+  # PCA
+  vsd_s <- vst(dds_s, blind = TRUE)
+  pca_s <- plotPCA(vsd_s, intgroup = c("category_bin", "sample_id"), returnData = TRUE)
+  pct_s <- round(100 * attr(pca_s, "percentVar"))
+
+  p_pca_s <- ggplot(pca_s, aes(PC1, PC2,
+                                colour = category_bin,
+                                shape  = sample_id,
+                                label  = sample_id)) +
+    geom_point(size = 3.5) +
+    geom_text_repel(size = 2.5, max.overlaps = 20) +
+    scale_colour_manual(values = c(CB = "steelblue", DT = "firebrick")) +
+    scale_shape_manual(values = seq_len(length(unique(pca_s$sample_id)))) +
+    labs(title = "PCA — pseudobulk samples (VST, sample-level)",
+         x = paste0("PC1: ", pct_s[1], "% variance"),
+         y = paste0("PC2: ", pct_s[2], "% variance"),
+         colour = "Category", shape = "Sample") +
+    theme_classic()
+  ggsave(file.path(png_dir_s, "1_PCA_pseudobulk.png"),
+         p_pca_s, width = 9, height = 6, dpi = 200)
+
+  # Volcano
+  p_vol_s <- res_s_df %>%
+    filter(!is.na(pvalue)) %>%
+    mutate(
+      sig       = !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 1.25,
+      direction = case_when(
+        sig & log2FoldChange > 0 ~ "Up",
+        sig & log2FoldChange < 0 ~ "Down",
+        TRUE ~ "NS"
+      ),
+      label = ifelse(sig, gene, NA_character_)
+    ) %>%
+    ggplot(aes(log2FoldChange, -log10(pvalue + 1e-300),
+               colour = direction, label = label)) +
+    geom_point(size = 0.8, alpha = 0.7) +
+    geom_text_repel(size = 2.5, max.overlaps = 25, na.rm = TRUE) +
+    scale_colour_manual(values = c(NS = "grey70", Up = "firebrick", Down = "royalblue")) +
+    geom_vline(xintercept = c(-1.25, 1.25), linetype = "dashed", colour = "grey40") +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", colour = "grey40") +
+    labs(title = "DT vs CB — pseudobulk DESeq2 (sample-level)",
+         subtitle = paste0(n_sig_s, " DEGs  |  positive = DT"),
+         x = "log2 Fold Change", y = "-log10(p-value)") +
+    theme_classic() +
+    theme(legend.position = "none")
+  ggsave(file.path(png_dir_s, "2_volcano_DT_vs_CB.png"),
+         p_vol_s, width = 7, height = 5, dpi = 200)
+
+  # MA plot
+  p_ma_s <- res_s_df %>%
+    filter(!is.na(padj)) %>%
+    mutate(sig = padj < 0.05 & abs(log2FoldChange) > 0.5) %>%
+    ggplot(aes(log10(baseMean + 1), log2FoldChange, colour = sig)) +
+    geom_point(size = 0.7, alpha = 0.6) +
+    geom_hline(yintercept = 0, colour = "black") +
+    geom_hline(yintercept = c(-0.5, 0.5), linetype = "dashed", colour = "grey40") +
+    scale_colour_manual(values = c("grey70", "firebrick")) +
+    labs(title = "MA plot — DT vs CB (sample-level)",
+         x = "log10(mean counts + 1)", y = "log2 Fold Change") +
+    theme_classic() +
+    theme(legend.position = "none")
+  ggsave(file.path(png_dir_s, "3_MA_plot.png"),
+         p_ma_s, width = 6, height = 4, dpi = 200)
+
+  # Heatmap of top DEGs (VST z-scores)
+  sig_genes_s <- res_s_df %>% filter(!is.na(padj), padj < 0.05) %>% mutate(score = abs(log2FoldChange) / padj)
+  top_up_s    <- sig_genes_s %>% filter(log2FoldChange > 0) %>% slice_max(score, n = 30)
+  top_down_s  <- sig_genes_s %>% filter(log2FoldChange < 0) %>% slice_max(score, n = 30)
+  top_genes_s <- bind_rows(top_up_s, top_down_s) %>% pull(gene)
+
+  if (length(top_genes_s) >= 5) {
+    mat_hm_s <- assay(vsd_s)[top_genes_s, , drop = FALSE]
+    mat_hm_s <- t(scale(t(mat_hm_s)))
+    mat_hm_s[mat_hm_s >  3] <-  3
+    mat_hm_s[mat_hm_s < -3] <- -3
+
+    col_fun_s   <- colorRamp2(c(-3, 0, 3), c("#2166AC", "white", "#B2182B"))
+    cat_col_s   <- c(CB = "steelblue", DT = "firebrick")
+    samp_lvls_s <- levels(pb_meta_s$sample_id)
+    samp_col_hm <- setNames(as.vector(pals::polychrome(length(samp_lvls_s))), samp_lvls_s)
+
+    ha_s <- HeatmapAnnotation(
+      Category = pb_meta_s[colnames(mat_hm_s), "category_bin"],
+      Sample   = pb_meta_s[colnames(mat_hm_s), "sample_id"],
+      col      = list(Category = cat_col_s, Sample = samp_col_hm),
+      annotation_name_side = "left"
+    )
+
+    png(file.path(png_dir_s, "4_heatmap_top_DEGs.png"),
+        width = 1600, height = 2000, res = 200)
+    draw(Heatmap(
+      mat_hm_s,
+      name              = "z-score",
+      col               = col_fun_s,
+      top_annotation    = ha_s,
+      show_row_names    = TRUE,
+      show_column_names = TRUE,
+      row_names_gp      = gpar(fontsize = 7),
+      column_names_gp   = gpar(fontsize = 7),
+      column_title      = paste0("Top ", length(top_genes_s), " DEGs — DT vs CB (sample-level)"),
+      clustering_method_columns = "ward.D2",
+      column_split      = pb_meta_s[colnames(mat_hm_s), "category_bin"]
+    ))
+    dev.off()
+    cat("Heatmap saved (sample-level)\n")
+  }
+
+  # GSEA — significant genes
+  sig_df_s <- res_s_df %>%
+    filter(!is.na(padj), padj < 0.05) %>%
+    arrange(desc(log2FoldChange))
+
+  if (nrow(sig_df_s) > 0) {
+    gene_list_s <- setNames(sig_df_s$log2FoldChange, sig_df_s$gene)
+
+    enrich_list_s <- lapply(list(Hallmark = Hall, C6 = C6, C5 = C5,
+                                  Archetype = Archetype,
+                                  MetaProgMalignant = MetaProgM), function(gs) {
+      tryCatch(
+        clusterProfiler::GSEA(gene_list_s, TERM2GENE = gs, verbose = FALSE),
+        error   = function(e) NULL,
+        warning = function(w) NULL
+      )
+    })
+    saveRDS(enrich_list_s, file.path(paired_sample_dir, "enrich_DT_vs_CB.Rds"))
+
+    for (nm in names(enrich_list_s)) {
+      res_e <- enrich_list_s[[nm]]
+      if (is.null(res_e) || nrow(res_e@result) == 0) next
+      sig_n <- sum(res_e@result$p.adjust < 0.05, na.rm = TRUE)
+      if (sig_n == 0) next
+      p_e <- pathwayenrich_plot(top_n = min(10, sig_n), gsea_result = res_e)
+      ggsave(file.path(png_dir_s, paste0("5_GSEA_", nm, ".pdf")),
+             p_e, width = 6, height = 10)
+    }
+    cat("Enrichment done (sample-level)\n")
+  } else {
+    cat("No significant DEGs (sample-level) — skipping enrichment\n")
+  }
+
+  # GSEA — all DEGs regardless of p-value
+  all_df_s <- res_s_df %>%
+    filter(!is.na(log2FoldChange)) %>%
+    arrange(desc(log2FoldChange))
+
+  gene_list_all_s <- setNames(all_df_s$log2FoldChange, all_df_s$gene)
+
+  enrich_list_all_s <- lapply(list(Hallmark = Hall, C6 = C6, C5 = C5,
+                                    Archetype = Archetype,
+                                    MetaProgMalignant = MetaProgM), function(gs) {
+    tryCatch(
+      clusterProfiler::GSEA(gene_list_all_s, TERM2GENE = gs, verbose = FALSE),
+      error   = function(e) NULL,
+      warning = function(w) NULL
+    )
+  })
+  saveRDS(enrich_list_all_s, file.path(paired_sample_dir, "enrich_DT_vs_CB_allgenes.Rds"))
+
+  for (nm in names(enrich_list_all_s)) {
+    res_e <- enrich_list_all_s[[nm]]
+    if (is.null(res_e) || nrow(res_e@result) == 0) next
+    sig_n <- sum(res_e@result$p.adjust < 0.05, na.rm = TRUE)
+    if (sig_n == 0) next
+    p_e <- pathwayenrich_plot(top_n = min(10, sig_n), gsea_result = res_e)
+    ggsave(file.path(png_dir_s, paste0("5b_GSEA_allDEGs_", nm, ".pdf")),
+           p_e, width = 6, height = 10)
+  }
+  cat("Enrichment (all DEGs, no p-value filter) done (sample-level)\n")
+
+  # Summary
+  summary_df_s <- data.frame(
+    direction = c("DT > CB (lfc > 0.5)", "CB > DT (lfc < -0.5)"),
+    n_genes   = c(
+      sum(!is.na(res_s_df$padj) & res_s_df$padj < 0.05 & res_s_df$log2FoldChange >  0.5),
+      sum(!is.na(res_s_df$padj) & res_s_df$padj < 0.05 & res_s_df$log2FoldChange < -0.5)
+    )
+  )
+  write.csv(summary_df_s, file.path(paired_sample_dir, "DEG_summary.csv"), row.names = FALSE)
+  print(summary_df_s)
+
+  # Per-sample GSEA NES heatmap — rank genes by DT-CB VST difference per sample
+  vst_mat_s <- assay(vsd_s)
+  samps_s   <- unique(pb_meta_s$sample_id)
+
+  per_sample_lfc <- vapply(samps_s, function(sm) {
+    dt_col <- rownames(pb_meta_s)[pb_meta_s$sample_id == sm & pb_meta_s$category_bin == "DT"]
+    cb_col <- rownames(pb_meta_s)[pb_meta_s$sample_id == sm & pb_meta_s$category_bin == "CB"]
+    vst_mat_s[, dt_col[1]] - vst_mat_s[, cb_col[1]]
+  }, numeric(nrow(vst_mat_s)))
+  rownames(per_sample_lfc) <- rownames(vst_mat_s)
+
+  for (coll_nm in names(gsea_collections)) {
+    gs <- gsea_collections[[coll_nm]]
+
+    gsea_per_sample <- setNames(lapply(samps_s, function(sm) {
+      lfc_vec <- sort(per_sample_lfc[, sm], decreasing = TRUE)
+      tryCatch(
+        clusterProfiler::GSEA(lfc_vec, TERM2GENE = gs, verbose = FALSE,
+                               minGSSize = 5, maxGSSize = 500, pvalueCutoff = 1),
+        error = function(e) NULL
+      )
+    }), samps_s)
+
+    all_pathways_s <- unique(unlist(lapply(gsea_per_sample, function(x) {
+      if (is.null(x) || nrow(x@result) == 0) character(0) else x@result$ID
+    })))
+    if (length(all_pathways_s) == 0) { cat(coll_nm, ": no pathways (sample-level)\n"); next }
+
+    nes_mat_s  <- matrix(NA_real_, nrow = length(all_pathways_s), ncol = length(samps_s),
+                         dimnames = list(all_pathways_s, samps_s))
+    padj_mat_s <- nes_mat_s
+    for (sm in samps_s) {
+      r <- gsea_per_sample[[sm]]
+      if (is.null(r) || nrow(r@result) == 0) next
+      idx <- match(r@result$ID, all_pathways_s)
+      nes_mat_s [idx, sm] <- r@result$NES
+      padj_mat_s[idx, sm] <- r@result$p.adjust
+    }
+
+    sig_rows_s <- rowSums(!is.na(padj_mat_s) & padj_mat_s < 0.05) >= 1
+    if (sum(sig_rows_s) == 0) { cat(coll_nm, ": no significant pathways (sample-level)\n"); next }
+
+    nes_plot_s <- nes_mat_s[sig_rows_s, , drop = FALSE]
+
+    if (nrow(nes_plot_s) > 50) {
+      breadth_s  <- rowSums(!is.na(padj_mat_s[sig_rows_s, , drop = FALSE]) &
+                              padj_mat_s[sig_rows_s, , drop = FALSE] < 0.05)
+      mean_abs_s <- rowMeans(abs(nes_plot_s), na.rm = TRUE)
+      ord_s      <- order(-breadth_s, -mean_abs_s)
+      nes_plot_s <- nes_plot_s[ord_s[seq_len(50)], , drop = FALSE]
+    }
+
+    nes_plot_s[is.na(nes_plot_s)] <- 0  # NA → 0 for display (pathway not tested in that sample)
+
+    rn_s <- rownames(nes_plot_s)
+    rn_s <- sub("^HALLMARK_", "", rn_s)
+    rn_s <- sub("^KEGG_|^REACTOME_|^GOBP_|^GOCC_|^GOMF_", "", rn_s)
+    rn_s <- gsub("_", " ", rn_s)
+    rownames(nes_plot_s) <- rn_s
+
+    samp_lvls_s <- unique(colnames(nes_plot_s))
+    samp_col_s  <- setNames(colorRampPalette(brewer.pal(8, "Set2"))(length(samp_lvls_s)), samp_lvls_s)
+
+    ha_col_s <- HeatmapAnnotation(
+      Sample = colnames(nes_plot_s),
+      col    = list(Sample = samp_col_s),
+      annotation_name_side = "left"
+    )
+
+    nes_lim_s <- min(max(abs(nes_plot_s), na.rm = TRUE), 3)
+    col_nes_s <- colorRamp2(c(-nes_lim_s, 0, nes_lim_s), c("#2166AC", "white", "#B2182B"))
+
+    png_h_s <- max(800,  35 * nrow(nes_plot_s) + 300)
+    png_w_s <- max(1000, 55 * ncol(nes_plot_s) + 500)
+
+    png(file.path(png_dir_s, paste0("6_GSEA_NES_heatmap_", coll_nm, ".png")),
+        width = png_w_s, height = png_h_s, res = 150)
+    draw(Heatmap(
+      nes_plot_s,
+      name              = "NES",
+      col               = col_nes_s,
+      top_annotation    = ha_col_s,
+      show_row_names    = TRUE,
+      show_column_names = TRUE,
+      row_names_gp      = gpar(fontsize = 8),
+      column_names_gp   = gpar(fontsize = 7),
+      column_title      = paste0("GSEA NES — ", coll_nm, "  (DT vs CB per sample)"),
+      cluster_rows      = TRUE,
+      cluster_columns   = TRUE,
+      clustering_method_rows    = "ward.D2",
+      clustering_method_columns = "ward.D2",
+      rect_gp           = gpar(col = "grey85", lwd = 0.5)
+    ))
+    dev.off()
+    cat("GSEA NES heatmap (sample-level):", coll_nm, "—", nrow(nes_plot_s), "pathways ×",
+        ncol(nes_plot_s), "samples\n")
+  }
+}
+
 # ── 9. Cohort B vs Cohort A among DT pseudobulks ─────────────────────────────
 cohortA <- c("LUT-245-07", "LUT-245-09", "LUT-245-10")
 cohortB <- c("LUT-245-11", "LUT-245-15", "LUT-245-16", "LUT-245-17", "LUT-245-20")
@@ -528,15 +874,20 @@ if (length(unique(pb_meta_dt$cohort)) < 2 || ncol(pb_counts_dt) < 4) {
   p_vol_co <- res_co_df %>%
     filter(!is.na(pvalue)) %>%
     mutate(
-      sig   = !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 0.5,
-      label = ifelse(sig & rank(-abs(log2FoldChange)) <= 30, gene, NA_character_)
+      sig       = !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 1.25,
+      direction = case_when(
+        sig & log2FoldChange > 0 ~ "Up",
+        sig & log2FoldChange < 0 ~ "Down",
+        TRUE ~ "NS"
+      ),
+      label = ifelse(sig, gene, NA_character_)
     ) %>%
     ggplot(aes(log2FoldChange, -log10(pvalue + 1e-300),
-               colour = sig, label = label)) +
+               colour = direction, label = label)) +
     geom_point(size = 0.8, alpha = 0.7) +
     geom_text_repel(size = 2.5, max.overlaps = 25, na.rm = TRUE) +
-    scale_colour_manual(values = c("grey70", "firebrick")) +
-    geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", colour = "grey40") +
+    scale_colour_manual(values = c(NS = "grey70", Up = "firebrick", Down = "royalblue")) +
+    geom_vline(xintercept = c(-1.25, 1.25), linetype = "dashed", colour = "grey40") +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", colour = "grey40") +
     labs(title = "Cohort B vs A — DT pseudobulk DESeq2",
          subtitle = paste0(n_sig_co, " DEGs  |  positive = cohort B"),
@@ -561,10 +912,10 @@ if (length(unique(pb_meta_dt$cohort)) < 2 || ncol(pb_counts_dt) < 4) {
          p_ma_co, width = 6, height = 4, dpi = 200)
 
   # 9d. Heatmap of top DEGs
-  top_co <- res_co_df %>%
-    filter(!is.na(padj), padj < 0.05, abs(log2FoldChange) > 0.5) %>%
-    slice_min(padj, n = 60) %>%
-    pull(gene)
+  sig_co      <- res_co_df %>% filter(!is.na(padj), padj < 0.05) %>% mutate(score = abs(log2FoldChange) / padj)
+  top_co_up   <- sig_co %>% filter(log2FoldChange > 0) %>% slice_max(score, n = 30)
+  top_co_down <- sig_co %>% filter(log2FoldChange < 0) %>% slice_max(score, n = 30)
+  top_co      <- bind_rows(top_co_up, top_co_down) %>% pull(gene)
 
   if (length(top_co) >= 5) {
     mat_co <- assay(vsd_co)[top_co, , drop = FALSE]
@@ -716,13 +1067,18 @@ run_unpaired_block <- function(counts, meta, group_var, contrast,
 
   # Volcano
   p_vol <- res_df %>% filter(!is.na(pvalue)) %>%
-    mutate(sig   = !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 0.5,
-           label = ifelse(sig & rank(-abs(log2FoldChange)) <= 30, gene, NA_character_)) %>%
-    ggplot(aes(log2FoldChange, -log10(pvalue + 1e-300), colour = sig, label = label)) +
+    mutate(sig       = !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 1.25,
+           direction = case_when(
+             sig & log2FoldChange > 0 ~ "Up",
+             sig & log2FoldChange < 0 ~ "Down",
+             TRUE ~ "NS"
+           ),
+           label = ifelse(sig, gene, NA_character_)) %>%
+    ggplot(aes(log2FoldChange, -log10(pvalue + 1e-300), colour = direction, label = label)) +
     geom_point(size = 0.8, alpha = 0.7) +
     geom_text_repel(size = 2.5, max.overlaps = 25, na.rm = TRUE) +
-    scale_colour_manual(values = c("grey70", "firebrick")) +
-    geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", colour = "grey40") +
+    scale_colour_manual(values = c(NS = "grey70", Up = "firebrick", Down = "royalblue")) +
+    geom_vline(xintercept = c(-1.25, 1.25), linetype = "dashed", colour = "grey40") +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", colour = "grey40") +
     labs(title = title_tag, subtitle = paste0(n_sig, " DEGs  |  positive = ", contrast[2]),
          x = "log2 Fold Change", y = "-log10(p-value)") +
@@ -743,8 +1099,10 @@ run_unpaired_block <- function(counts, meta, group_var, contrast,
   ggsave(file.path(pdir, "3_MA.png"), p_ma, width = 6, height = 4, dpi = 200)
 
   # Heatmap of top DEGs (VST z-scores)
-  top_genes <- res_df %>% filter(!is.na(padj), padj < 0.05, abs(log2FoldChange) > 0.5) %>%
-    slice_min(padj, n = 60) %>% pull(gene)
+  sig_genes <- res_df %>% filter(!is.na(padj), padj < 0.05) %>% mutate(score = abs(log2FoldChange) / padj)
+  top_up    <- sig_genes %>% filter(log2FoldChange > 0) %>% slice_max(score, n = 30)
+  top_down  <- sig_genes %>% filter(log2FoldChange < 0) %>% slice_max(score, n = 30)
+  top_genes <- bind_rows(top_up, top_down) %>% pull(gene)
   if (length(top_genes) >= 5) {
     mat <- t(scale(t(assay(vsd)[top_genes, , drop = FALSE])))
     mat[mat >  3] <-  3; mat[mat < -3] <- -3
@@ -837,6 +1195,7 @@ run_unpaired_block(
   title_tag  = "Cohort B vs A — unpaired DT (all samples)")
 
 message("\nDone. Results in: ", outdir,
-        "\n  paired/                     — original paired DT-vs-CB + paired-subset cohort B-vs-A",
+        "\n  paired/                     — original paired DT-vs-CB (sample_subclone-level) + paired-subset cohort B-vs-A",
+        "\n  paired_sample/              — paired DT-vs-CB, sample-level (subclones pooled)",
         "\n  unpaired_DT_vs_CB/          — DT vs CB, all samples (~category_bin)",
         "\n  unpaired_cohort_B_vs_A_DT/  — cohort B vs A on all DT pseudobulks (~cohort)")

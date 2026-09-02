@@ -24,7 +24,7 @@ png_dir  <- file.path(outdir, "png")
 dir.create(png_dir, showWarnings = FALSE, recursive = TRUE)
 
 # ── Gene set: AR + FOLH1 + all DEGs (padj<0.05, |lfc|>1.25) from 5.2 ─────────
-deg_path <- file.path(base_dir, "5.3.DESeq2_results", "deseq2_res_DT_vs_CB.Rds")
+deg_path <- file.path(base_dir, "5.3.DESeq2_results", "paired_sample", "deseq2_res_DT_vs_CB.Rds")
 top_degs <- character(0)
 if (file.exists(deg_path)) {
   res_df <- readRDS(deg_path) %>% filter(!is.na(pvalue))
@@ -37,10 +37,31 @@ if (file.exists(deg_path)) {
 }
 # Curated marker panels for individual per-gene comparison (SLC18A1 = VMAT1)
 ar_genes <- c("AR", "FOLH1", "KLK3", "NKX3-1", "TMPRSS2", "KLK4", "STEAP2", "STEAP1")
-ne_genes <- c("CHGA", "CHGB", "SCG2", "SLC18A1", "SYNGR4", "NPB", "PTPN5")
+ne_genes <- c("CHGA", "CHGB", "SCG2", "SLC18A1", "SYNGR4", "NPB", "PTPN5", "HDAC9", "SYP", "ENO2", "NCAM1", "ELAVL4", "GABRG2", "GABRA1", "GABRB2")
 
 genes <- unique(c("AR", "FOLH1", top_degs, ar_genes, ne_genes))
 cat("Testing", length(genes), "genes total\n")
+
+# ── Spatial dark_feature_plots (per gene, per sample) + SpaNorm expression ───
+dark_dir <- file.path(png_dir, "dark_feature_plots")
+dir.create(dark_dir, showWarnings = FALSE, recursive = TRUE)
+dark_plots   <- setNames(vector("list", length(genes)), genes)
+spanorm_list <- list()
+
+# Tissue coordinates for a per-sample object: FOV centroids, falling back to
+# x_centroid/y_centroid meta.data (mirrors dark_feature_plot()'s own fallback).
+.get_srt_coords <- function(srt) {
+  coords <- tryCatch(Seurat::GetTissueCoordinates(srt, which = "centroids"),
+                      error = function(e) NULL)
+  if (!is.null(coords)) {
+    id_col <- intersect(c("cell", "barcode", "id"), names(coords))
+    idx <- match(colnames(srt), coords[[id_col[1]]])
+    return(data.frame(x = coords$x[idx], y = coords$y[idx]))
+  }
+  if (all(c("x_centroid", "y_centroid") %in% colnames(srt@meta.data)))
+    return(data.frame(x = srt$x_centroid, y = srt$y_centroid))
+  stop(".get_srt_coords: no FOV and no x_centroid/y_centroid meta.data.")
+}
 
 # ── Per-sample proportion calculation ─────────────────────────────────────────
 prop_list <- list()
@@ -56,6 +77,29 @@ for (s in samples) {
   if (length(available) == 0) next
 
   counts <- GetAssayData(obj, assay = "Spatial", layer = "counts")[available, , drop = FALSE]
+
+  # SpaNorm expression + spatial coords for this sample's available genes
+  spanorm_mat <- GetAssayData(obj, assay = "SpaNorm", layer = "data")[available, , drop = FALSE]
+  xy <- .get_srt_coords(obj)
+  spanorm_list[[length(spanorm_list) + 1]] <- data.frame(
+    sample     = s,
+    cell       = rep(colnames(obj), length(available)),
+    gene       = rep(available, each = ncol(obj)),
+    expression = as.vector(as.matrix(t(spanorm_mat))),
+    category   = rep(obj$category_bin, length(available)),
+    pos        = as.vector(as.matrix(t(counts))) > 0,
+    x          = rep(xy$x, length(available)),
+    y          = rep(xy$y, length(available)),
+    stringsAsFactors = FALSE
+  )
+
+  # Per-gene dark_feature_plot for this sample, titled with the sample name
+  # (samples are combined side-by-side per gene once the loop finishes)
+  for (g in available) {
+    dark_plots[[g]][[s]] <- dark_feature_plot(obj, features = g, pt_size_range = c(0.01, 1.2),
+                                               assay = "SpaNorm", layer = "data") &
+      ggtitle(s)
+  }
 
   for (cat_v in c("DT", "CB")) {
     cells <- colnames(obj)[!is.na(obj$category_bin) & obj$category_bin == cat_v]
@@ -76,6 +120,31 @@ prop_df <- bind_rows(prop_list)
 prop_df$gene <- factor(prop_df$gene, levels = genes[genes %in% prop_df$gene])
 saveRDS(prop_df,  file.path(outdir, "expression_proportion.Rds"))
 write.csv(prop_df, file.path(outdir, "expression_proportion.csv"), row.names = FALSE)
+
+# ── Aggregated per-gene spatial dark_feature_plots (samples 1-8 side by side) ─
+for (g in genes) {
+  plist <- dark_plots[[g]]
+  if (length(plist) == 0) next
+  n_col <- min(4, length(plist))
+  n_row <- ceiling(length(plist) / n_col)
+  agg <- patchwork::wrap_plots(plist, ncol = n_col) +
+    patchwork::plot_annotation(
+      title = g,
+      theme = theme(plot.background = element_rect(fill = "black", colour = "black"),
+                    plot.title = element_text(colour = "white", hjust = 0.5, face = "bold"))
+    ) &
+    theme(plot.background = element_rect(fill = "black", colour = "black"))
+  ggsave(file.path(dark_dir, paste0(g, "_spatial_dark.png")),
+         agg, width = n_col * 3, height = n_row * 3, dpi = 200,
+         bg = "black", limitsize = FALSE)
+}
+message("Saved aggregated dark_feature_plots to: ", dark_dir)
+
+# ── SpaNorm expression per cell + spatial coordinates (all genes, all samples) ─
+spanorm_df <- bind_rows(spanorm_list)
+saveRDS(spanorm_df, file.path(outdir, "spanorm_expression_per_cell.Rds"))
+write.csv(spanorm_df, file.path(outdir, "spanorm_expression_per_cell.csv"), row.names = FALSE)
+cat("Saved SpaNorm per-cell expression + coordinates:", nrow(spanorm_df), "rows\n")
 
 # ── Paired Wilcoxon test per gene (DT vs CB across samples) ──────────────────
 wilcox_df <- prop_df %>%
@@ -133,13 +202,37 @@ make_prop_plots <- function(df, wilcox_df, tag, plots = c("bar", "box")) {
       theme(legend.position = "none",
             strip.text = element_text(size = 9, face = "bold"))
     ggsave(file.path(png_dir, paste0("2_boxplot_DT_vs_CB_", tag, ".png")),
-           p_box, width = n_col * 2.8, height = n_row * 2.8, dpi = 200, limitsize = FALSE)
+           p_box, width = n_col * 2, height = n_row * 2.8, dpi = 200, limitsize = FALSE)
   }
 }
 
 key_genes <- c("AR", "FOLH1")
 make_prop_plots(filter(prop_df,  gene %in% key_genes), wilcox_df, "AR_FOLH1")
 make_prop_plots(filter(prop_df, !gene %in% key_genes), wilcox_df, "DEGs")
+
+# ── Boxplot: SpaNorm expression per sample, positive-count cells only ────────
+make_expr_boxplot <- function(df, tag) {
+  n_genes <- length(unique(df$gene))
+  if (n_genes == 0) { message("No genes for ", tag, " - skipping expression boxplot"); return(invisible(NULL)) }
+  n_col <- min(4, n_genes)
+  n_row <- ceiling(n_genes / n_col)
+  p <- ggplot(df, aes(sample, expression, fill = category)) +
+    geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA, alpha = 0.7) +
+    facet_wrap(~ gene, scales = "free_y", ncol = n_col) +
+    scale_fill_manual(values = c(CB = "steelblue", DT = "firebrick")) +
+    labs(title = paste0("SpaNorm expression, positive-count cells only (", tag, ")"),
+         x = NULL, y = "SpaNorm expression") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+          strip.text  = element_text(size = 9, face = "bold"))
+  ggsave(file.path(png_dir, paste0("3_boxplot_spanorm_expression_", tag, ".png")),
+         p, width = n_col * 3.5, height = n_row * 2.8, dpi = 200, limitsize = FALSE)
+}
+
+spanorm_pos <- spanorm_df %>% filter(pos)
+spanorm_pos$gene <- factor(spanorm_pos$gene, levels = genes[genes %in% spanorm_pos$gene])
+make_expr_boxplot(filter(spanorm_pos,  gene %in% key_genes), "AR_FOLH1")
+make_expr_boxplot(filter(spanorm_pos, !gene %in% key_genes), "DEGs")
 
 # ── Individual per-gene comparison for the AR and NE marker panels ────────────
 # Box-only (DT vs CB), one figure per panel, facets ordered as the panel is listed.

@@ -2,11 +2,11 @@
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=80G
-#SBATCH --time=4:00:00
-#SBATCH --job-name=DT_signature_analysis
+#SBATCH --mem=150G
+#SBATCH --time=3:00:00
+#SBATCH --job-name=spiat_coloc
 #SBATCH --array=1-8
-#SBATCH --output="slurmout/6.4.DT_signature_analysis-%j-%a.out"
+#SBATCH --output="slurmout/10.5.SPIAT_colocalization-%j-%a.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org
 #SBATCH --mail-type=ALL
 #SBATCH --account=pawsey1172
@@ -32,4 +32,4 @@ srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $SLURM_CPUS_PER_TASK \
   -B ${dir}:$HOME \
   -B ${tmp_dir}:/var \
   ${imagename} \
-  Rscript ~/VisHD/6.4.DT_signature_analysis.r "$SLURM_ARRAY_TASK_ID"
+  Rscript ~/VisHD/10.5.SPIAT_colocalization.R "$SLURM_ARRAY_TASK_ID"

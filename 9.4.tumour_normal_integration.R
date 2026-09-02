@@ -114,6 +114,19 @@ cat("\nSaved integrated_pearson_srt.qs2\n")
 Idents(srt) <- "pearson_clusters_batch"
 n_clu <- nlevels(factor(srt$pearson_clusters_batch))
 
+# ── 6.5. Per-slide barcode/cell_type CSV export ───────────────────────────────
+# `cell` is a per-slide sequential index (e.g. 26, 27, 28...), not a real
+# barcode; format it as cellid_000000026-1 to match the segmented-output style.
+celltype_csv_dir <- file.path(out_dir, "celltype_csv")
+dir.create(celltype_csv_dir, showWarnings = FALSE, recursive = TRUE)
+for (s in sort(unique(srt$slide))) {
+  idx <- srt$slide == s
+  df  <- data.frame(barcode = sprintf("cellid_%09d-1", as.integer(srt$cell[idx])),
+                     cell_type = srt$cell_type[idx])
+  write.csv(df, file.path(celltype_csv_dir, paste0(s, "_celltype.csv")), row.names = FALSE)
+}
+cat("\nSaved per-slide cell_type CSVs to", celltype_csv_dir, "\n")
+
 # ── 7. Embedding DimPlots (pearsonbatchumap) ──────────────────────────────────
 cols = c("red","gold", "#8DD3C7","#FFFFB3","#BEBADA", "#FB8072", "#80B1D3", "#FDB462", "#B3DE69",
          "#FCCDE5", "#D9D9D9")
@@ -178,8 +191,8 @@ ggsave(file.path(png_dir, "9_spatial_all_samples.png"), p_all,
 # Resolve the single "Tumour" bucket into its per-cell signature label using the
 # 6.2.3 binarisation output (metas$Module_group), and score the three groupdeg
 # signatures on the integrated object. Normals collapse to a single "Normal".
-metas    <- readRDS("~/VisHD/6.4.signature_analysis/binarisation/metas.Rds")
-groupdeg <- readRDS(paste0("~/VisHD/6.2archetype_downstream_tumour/archetype_module/",
+metas    <- readRDS("~/VisHD/6.4.DT_signature_analysis/metas.Rds")
+groupdeg <- readRDS(paste0("~/VisHD/6.3.DT_archetype_module/",
                            "group_DEG_enrichment/cross_sample_summary/groupdeg.rds"))
 
 # barcode key in the integrated object is slide_<cell>; metas carries slide + cell
@@ -200,14 +213,9 @@ labs <- names(groupdeg)
 group_combos <- unlist(lapply(seq_along(labs), function(k)
   combn(labs, k, FUN = function(x) paste(x, collapse = "/"))))
 group_levels <- c("Neg", group_combos)
-group_pal <- c("Neg"      = "lightblue",
-               "G1"       = "red",
-               "G2"       = "gold",
-               "G3"       = "royalblue",
-               "G1/G2"    = "orange",
-               "G1/G3"    = "purple",
-               "G2/G3"    = "green",
-               "G1/G2/G3" = "grey")
+group_pal <- c(Neg = "lightblue",
+               setNames(colorRampPalette(RColorBrewer::brewer.pal(8, "Set2"))(length(group_combos)),
+                        group_combos))
 canon   <- function(x) vapply(strsplit(x, "/"),
                               function(p) paste(sort(p), collapse = "/"), character(1))
 present <- levels(droplevels(factor(module_anno)))
@@ -305,6 +313,7 @@ for (m in mod_cols) {
 
 # Persist new fields (module_anno + module scores) onto the saved object
 qs_save(srt, file.path(out_dir, "integrated_pearson_srt.qs2"))
+
 cat("\nRe-saved integrated_pearson_srt.qs2 with module_anno + module scores\n")
 
 cat("\nDone. Outputs in", out_dir, "\n")

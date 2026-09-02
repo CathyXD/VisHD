@@ -156,3 +156,87 @@ fibro_marker <- list(smooth_muscle = c("ACTA2", "MYH11", "KCNJ8", "CNN1"),
                      resting_fibroblast = c("S100A4", "CFD", "DPT"), 
                      inflam = c("FAP", "COL1A1", "POSTN","CTHRC1"), 
                      adipose =c("ABCC9", "RGS5", "GJC1", "ADCY3","COX4I2", "LPL"))
+
+# Cell-type marker gene signatures
+# Source: Nat Commun 2023 (41467-2023-36325), Supplementary Data 3
+# Parsed from 41467_2023_36325_MOESM6_ESM.xlsx
+# NOTE: gene symbols are as-published (GRCh37/pre-HGNC-update in places,
+#       e.g. DARC->ACKR1, C19orf10->MYDGF, KIAA0226->RUBCN). Intersect with
+#       rownames(seu) before scoring.
+ 
+# ---- Option A: Tumor signature only ----
+prostate_tumor_signature <- c("AMACR", "CACNA1D", "PCA3", "ERG", "FABP5", "COL9A2", "GCNT1", "PHGR1")
+ 
+# ---- Option B: full named list of all cell types ----
+marker_signatures <- list(
+  `Mast cells` = c("TPSAB1", "CPA3", "HPGDS", "RGS13", "IL1RL1", "KIT", "GATA2", "FOSB", "RP11-354E11.2", "VWA5A", "SLC18A2", "HDC", "CAPG"),
+  `Endothelial cells` = c("RAMP2", "TM4SF1", "RNASE1", "EGFL7", "RAMP3", "PLVAP", "AQP1", "ECSCR", "FKBP1A", "AC011526.1", "EMP1", "DARC", "VWF", "EMCN"),
+  `Pericytes` = c("RGS5", "ACTA2", "MYH11", "MT1M", "FRZB", "MT1A", "NDUFA4L2", "PPP1R14A", "MYLK", "PHLDA1"),
+  `Fibroblasts` = c("DCN", "LUM", "PTN", "IGF1", "APOD", "COL1A2", "FBLN1", "MEG3", "CXCL12"),
+  `PDC` = c("IRF7", "IRF4", "LILRA4", "PPP1R14B", "SOX4", "TSPAN13", "KIAA0226", "PTCRA", "RAB11FIP1", "CXCR3", "IL3RA"),
+  `B cells` = c("MS4A1", "CD79B", "BTG1", "VPREB3", "BANK1", "CD79A", "IGLL5"),
+  `Plasma cells` = c("SEC11C", "XBP1", "PRDX4", "SPCS2", "SSR3", "SDF2L1", "C19orf10", "MANF", "TMEM258", "DNAJB9"),
+  `Macrophage` = c("C1QA", "C1QC", "C1QB", "GPR34", "CSF1R", "MS4A4A"),
+  `Monocytes` = c("S100A9", "FCN1", "S100A8", "CSTA", "EREG", "NEAT1", "TKT", "THBS1", "VCAN", "TSPO", "LYZ"),
+  `mDC` = c("CD1C", "PKIB", "INSIG1", "CLEC10A", "C15orf48", "PPA1"),
+  `NK` = c("NKG7", "GNLY", "KLRD1", "KLRB1", "FGFBP2", "PRF1"),
+  `CTL` = c("CD8A", "CD8B", "GZMH", "GZMA", "PTPRC"),
+  `Naive Th` = c("CCR7", "SELL"),
+  `Th1` = c("CD4", "IL2", "TNF"),
+  `Treg` = c("TIGIT", "CTLA4", "SOD1", "TNFRSF4", "TNFRSF18", "RTKN2", "FOXP3"),
+  `Epithelial Club` = c("SCGB1A3", "WFDC2", "LCN2", "MMP7", "KRT4", "TACSTD2", "SCGB3A1"),
+  `Epithelial Hillock` = c("KRT13", "S100A16", "S100A14", "KRT19"),
+  `Epithelial Basal` = c("TP63", "KRT14", "KRT5"),
+  `Epithelial Luminal` = c("KLK4", "KLK3", "KLK2", "ACPP", "AR"),
+  `Tumor` = c("AMACR", "CACNA1D", "PCA3", "ERG", "FABP5", "COL9A2", "GCNT1", "PHGR1"),
+  `Th17` = c("IL17A", "IL17F", "RORC", "CD4", "CCL20", "CCR6", "RORA"),
+  `CD8+ effector` = c("CD8A", "CD8B", "IFNG", "GZMK"),
+  `CD56bright NK` = c("KLRC1", "CD44", "COTL1", "XCL1", "XCL2", "TBX21", "EOMES"),
+  `CD56dim NK` = c("GZMB", "FGFBP2", "PRF1", "FCGR3A", "TBX21"),
+  `NKT` = c("CD44", "CD8A", "CD3D", "NKG7")
+)
+
+Epithelial_subtype <- list(
+  `Club`    = c("SCGB1A3", "WFDC2", "LCN2", "MMP7", "KRT4", "TACSTD2", "SCGB3A1"),
+  `Hillock` = c("KRT13", "S100A16", "S100A14", "KRT19"),
+  `Basal`   = c("TP63", "KRT14", "KRT5"),
+  `Luminal` = c("KLK4", "KLK3", "KLK2", "ACPP", "AR")
+)
+
+Stromal_subtype <- list(
+  `Endothelial` = c("RAMP2", "TM4SF1", "RNASE1", "EGFL7", "RAMP3", "PLVAP", "AQP1",
+                    "ECSCR", "FKBP1A", "AC011526.1", "EMP1", "DARC", "VWF", "EMCN"),
+  `Pericyte`    = c("RGS5", "ACTA2", "MYH11", "MT1M", "FRZB", "MT1A", "NDUFA4L2",
+                    "PPP1R14A", "MYLK", "PHLDA1"),
+  `Fibroblast`  = c("DCN", "LUM", "PTN", "IGF1", "APOD", "COL1A2", "FBLN1", "MEG3", "CXCL12")
+)
+
+Myeloid_subtype <- list(
+  `Macrophage` = c("C1QA", "C1QC", "C1QB", "GPR34", "CSF1R", "MS4A4A"),
+  `Monocyte`   = c("S100A9", "FCN1", "S100A8", "CSTA", "EREG", "NEAT1", "TKT",
+                   "THBS1", "VCAN", "TSPO", "LYZ"),
+  `mDC`        = c("CD1C", "PKIB", "INSIG1", "CLEC10A", "C15orf48", "PPA1"),
+  `pDC`        = c("IRF7", "IRF4", "LILRA4", "PPP1R14B", "SOX4", "TSPAN13",
+                   "KIAA0226", "PTCRA", "RAB11FIP1", "CXCR3", "IL3RA"),
+  `Mast`       = c("TPSAB1", "CPA3", "HPGDS", "RGS13", "IL1RL1", "KIT", "GATA2",
+                   "FOSB", "RP11-354E11.2", "VWA5A", "SLC18A2", "HDC", "CAPG")
+)
+
+Tcell_subtype <- list(
+  `CTL`           = c("CD8A", "CD8B", "GZMH", "GZMA", "PTPRC"),
+  `CD8_effector`  = c("CD8A", "CD8B", "IFNG", "GZMK"),
+  `Naive_Th`      = c("CCR7", "SELL"),
+  `Th1`           = c("CD4", "IL2", "TNF"),
+  `Th17`          = c("IL17A", "IL17F", "RORC", "CD4", "CCL20", "CCR6", "RORA"),
+  `Treg`          = c("TIGIT", "CTLA4", "SOD1", "TNFRSF4", "TNFRSF18", "RTKN2", "FOXP3"),
+  `NK`            = c("NKG7", "GNLY", "KLRD1", "KLRB1", "FGFBP2", "PRF1"),
+  `CD56bright_NK` = c("KLRC1", "CD44", "COTL1", "XCL1", "XCL2", "TBX21", "EOMES"),
+  `CD56dim_NK`    = c("GZMB", "FGFBP2", "PRF1", "FCGR3A", "TBX21"),
+  `NKT`           = c("CD44", "CD8A", "CD3D", "NKG7")
+)
+
+Bcell_subtype <- list(
+  `B`      = c("MS4A1", "CD79B", "BTG1", "VPREB3", "BANK1", "CD79A", "IGLL5"),
+  `Plasma` = c("SEC11C", "XBP1", "PRDX4", "SPCS2", "SSR3", "SDF2L1",
+               "C19orf10", "MANF", "TMEM258", "DNAJB9")
+)

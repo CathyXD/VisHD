@@ -1,15 +1,18 @@
 #!/usr/bin/env Rscript
-# 6.2.archetype_downstream.R
-# Cross-sample downstream analysis of archetypal analysis results.
-# Reads per-sample archetype_result/ CSVs + native tumour_srt.qs2, then:
+# 6.2.archetype_downstream_DT.R
+# Cross-sample downstream analysis of archetypal analysis results, for the
+# DT-only run (6.1.archetypal_analysis_tumour_DT.ipynb — archetypes fit on
+# category == "DT" cells rather than the full tumour population).
+# Reads per-sample 6.1.DT_archetype/{sample}/ CSVs + native tumour_srt.qs2, then:
 #   - Aggregates archetype expression and pathway enrichment across all 8 samples
 #   - Computes archetype–archetype correlations (expression + pathway)
 #   - Derives recurrent gene expression modules via hierarchical clustering
 #   - Produces ComplexHeatmap visualisations
-#   - Imports per-cell archetype weights + argmax group into each tumour Seurat,
-#     scores each archetype's top DE genes (AddModuleScore), and renders
-#     cross-sample spatial maps (ImageDimPlot/ImageFeaturePlot); exports metadata
-# Output: VisHD/6.2.archetype_downstream_tumour/
+#   - Imports per-cell archetype weights + argmax group into each tumour Seurat
+#     (subset to the DT cells the weights were fit on), scores each archetype's
+#     top DE genes (AddModuleScore), and renders cross-sample spatial maps
+#     (ImageDimPlot/ImageFeaturePlot); exports metadata
+# Output: VisHD/6.2.archetype_downstream_tumour_DT/
 
 suppressPackageStartupMessages({
   library(tidyverse)
@@ -21,14 +24,78 @@ suppressPackageStartupMessages({
   library(SeuratObject)
   library(patchwork)
   library(qs2)
+  library(pals)
 })
+
+options(error = function() { traceback(2); quit(status = 1, save = "no") })
+
+source("~/VisHD/functions.R")   # do.spanorm()
+
+# Local override of do.spanorm() for this script's small per-sample DT-only
+# subsets (~5000 cells): identical to do.spanorm() except the final Leiden
+# clustering step falls back to algorithm = 1 (Louvain) if Leiden errors out.
+# Small-n inputs can produce degenerate SpaNorm size factors / SNN graphs that
+# crash Seurat's group.singletons() inside algorithm = 4 (see functions.R
+# do.spanorm — unmodified there since it's shared by ~20 other pipeline scripts
+# that run on much larger objects without hitting this edge case).
+do.spanorm_dt <- function(srt, outdir = ".") {
+  require(SpaNorm, lib.loc = "~/R_Library/4.5")
+  require(leidenbase,  lib.loc = "~/R_Library/4.5")
+  if (length(SeuratObject::Layers(srt, assay = "Spatial")) > 1) {
+    srt <- SeuratObject::JoinLayers(srt, assay = "Spatial")
+  }
+  countMat <- GetAssayData(srt, assay = "Spatial", layer = "counts")
+
+  spatial_coord <- tryCatch(
+    GetTissueCoordinates(srt)[, c("x", "y")],
+    error = function(e) {
+      if (all(c("x_centroid", "y_centroid") %in% colnames(srt@meta.data))) {
+        setNames(srt@meta.data[, c("x_centroid", "y_centroid")], c("x", "y"))
+      } else {
+        stop("do.spanorm_dt: no image and no x_centroid/y_centroid in meta.data")
+      }
+    }
+  )
+  rownames(spatial_coord) <- colnames(countMat)
+  set.seed(1)
+  spe <- createSPEObject(countMat, spatial_locs = spatial_coord, cell_metadata = spatial_coord, normalize = FALSE)
+  spe <- SpaNorm(spe, df.tps = 4, sample.p = 0.25, gene.model = "nb")
+  spe <- SpaNormSVG(spe)
+  saveRDS(rowData(spe), file.path(outdir, "SVGs.Rds"))
+  spe <- SpaNormPCA(spe, ncomponents = 30, svg.fdr = 0.2, nsvgs = Inf)
+  pca_embeddings <- reducedDim(spe, "PCA")
+  rownames(pca_embeddings) <- colnames(srt)
+  topsvg <- topSVGs(spe, n = Inf, fdr = 0.2)
+
+  srt[["SpaNorm"]] <- CreateAssayObject(data = assay(spe, "logcounts"))
+  DefaultAssay(srt) <- "SpaNorm"
+
+  VariableFeatures(srt) <- rownames(topsvg)
+  srt[["pca"]] <- CreateDimReducObject(
+    embeddings = pca_embeddings,
+    key = "PC_",
+    assay = DefaultAssay(srt)
+  )
+  ndims <- min(20, ncol(pca_embeddings))
+  srt <- srt %>% RunUMAP(dims = 1:ndims) %>%
+    FindNeighbors(reduction = "pca", dims = 1:ndims)
+  srt <- tryCatch(
+    FindClusters(srt, resolution = 1, algorithm = 4),
+    error = function(e) {
+      message("  do.spanorm_dt: Leiden clustering failed (", conditionMessage(e),
+              ") — falling back to algorithm = 1 (Louvain)")
+      FindClusters(srt, resolution = 1, algorithm = 1)
+    }
+  )
+  srt
+}
 
 # ── Config ────────────────────────────────────────────────────────────────────
 samples <- c("LUT-245-07", "LUT-245-09", "LUT-245-10", "LUT-245-11",
              "LUT-245-15", "LUT-245-16", "LUT-245-17", "LUT-245-20")
 
 base_dir  <- "~/VisHD"
-outdir    <- file.path(base_dir, "6.2.archetype_downstream_tumour")
+outdir    <- file.path(base_dir, "6.2.archetype_downstream_tumour_DT")
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
 top_n_genes  <- 50    # genes per archetype for module discovery
@@ -39,6 +106,10 @@ top_n_de     <- 30    # top per-archetype DE genes used for AddModuleScore
 # Per-cell archetype spatial figures go in a sub-dir
 spdir <- file.path(outdir, "spatial")
 dir.create(spdir, showWarnings = FALSE, recursive = TRUE)
+
+# Per-sample DT-subset Seurat objects (re-SpaNormed, with archetype metadata)
+dtdir <- file.path(outdir, "DT_srt")
+dir.create(dtdir, showWarnings = FALSE, recursive = TRUE)
 
 # Archetype colour palette (supports up to 8 per-sample archetypes)
 max_arch  <- 8
@@ -60,7 +131,7 @@ pop_expr_list <- list()  # per-sample per-archetype mean SpaNorm expression (gen
 
 for (i in seq_along(samples)) {
   s          <- samples[i]
-  result_dir <- file.path(base_dir, s, "tumour", "archetype_result")
+  result_dir <- file.path(base_dir, "6.1.DT_archetype", s)
 
   expr_f  <- file.path(result_dir, "archetype_expression.csv")
   pw_e_f  <- file.path(result_dir, "pathway_enrichment_est.csv")
@@ -105,16 +176,34 @@ for (i in seq_along(samples)) {
   }
 
   message("Reading tumour_srt.qs2 for ", s, " (K=", K, " archetypes) ...")
-  srt <- qs_read(tumour_srt_f)
+  srt_full <- qs_read(tumour_srt_f)
 
-  # AA weights are written in adata/tumour_srt cell order (their integer obs_names
-  # are positional labels, not barcodes) → align by position to the Seurat cells.
-  w <- read.csv(weights_f, row.names = 1, check.names = FALSE)
-  if (nrow(w) != ncol(srt)) {
-    message("  ", s, ": weight rows (", nrow(w), ") != cells (", ncol(srt),
-            ") — skipping archetype import")
-    rm(srt); gc(); next
+  if (!"category" %in% colnames(srt_full@meta.data)) {
+    message("  ", s, ": 'category' column missing from tumour_srt.qs2 — skipping archetype import")
+    rm(srt_full); gc(); next
   }
+
+  # The DT notebook subsets tumour.h5ad to category == "DT" *before* fitting
+  # archetypes, so AA_cell_weights row names are 0-based Python positions into
+  # the FULL tumour object (not barcodes). Subset to the same DT cells directly
+  # here, then check that the position-derived index agrees before trusting it.
+  dt_pos   <- names(which(srt_full$category == "DT"))
+  w        <- read.csv(weights_f, row.names = 1, check.names = FALSE)
+  cell_pos <- rownames(w)
+
+  if (anyNA(cell_pos) || length(dt_pos) != nrow(w) || !identical(dt_pos, cell_pos)) {
+    message("  ", s, ": DT-subset cells (", length(dt_pos), ") don't match weight row positions (",
+            nrow(w), ") — skipping archetype import")
+    rm(srt_full); gc(); next
+  }
+
+  srt <- srt_full[, dt_pos]
+  rm(srt_full); gc()
+
+  # srt_full's SpaNorm assay was fit on the full tumour population; re-run
+  # SpaNorm on just the DT-subset cells so normalisation reflects this population.
+  srt <- do.spanorm_dt(srt)
+
   w_norm <- as.data.frame(w / rowSums(w))          # column-normalised → per-cell membership
   w_cols <- paste0("archW_", 0:(K - 1))
   colnames(w_norm) <- w_cols
@@ -124,7 +213,7 @@ for (i in seq_along(samples)) {
                                 levels = paste0("Archetype_", 0:(K - 1)))
 
   # AddModuleScore from each archetype's top DE genes (per sample)
-  score_assay <- if ("SpaNorm" %in% Assays(srt)) "SpaNorm" else "Spatial"
+  score_assay <- if (!is.null(srt@assays[["SpaNorm"]])) "SpaNorm" else "Spatial"
   DefaultAssay(srt) <- score_assay
   if (score_assay == "Spatial") srt <- NormalizeData(srt, verbose = FALSE)
 
@@ -138,6 +227,10 @@ for (i in seq_along(samples)) {
   rownames(pop_means) <- paste0(s, "_A", as.integer(sub("Archetype_", "", levels(pop_grp))))
   pop_expr_list[[s]] <- pop_means
 
+  # AddModuleScore bins genes by average expression (default nbin = 24) to pick
+  # control genes; sparse cell-level data ties many genes at the same average,
+  # so cap nbin at the number of distinct expression values actually present.
+  
   score_cols <- character(0)
   for (i in 0:(K - 1)) {
     de    <- read.csv(file.path(result_dir, sprintf("DE_Archetype_%d_vs_rest.csv", i)),
@@ -183,11 +276,12 @@ for (i in seq_along(samples)) {
         ggtitle(paste0(s, "  A", i, " DEG score")) + theme(plot.title = element_text(size = 8))
   }
 
-  # Collect archetype metadata for export, then free the object
+  # Collect archetype metadata for export, then save + free the object
   md         <- srt@meta.data[, c("archetype_group", w_cols, score_cols), drop = FALSE]
   md$barcode <- rownames(md)
   md$slide   <- s
   meta_list[[s]] <- md
+  qs_save(srt, file.path(dtdir, sprintf("%s_DT_srt.qs2", s)))
   rm(srt); gc()
 }
 

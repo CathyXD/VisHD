@@ -3,7 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=150G
-#SBATCH --time=5:00:00
+#SBATCH --time=8:00:00
 #SBATCH --job-name=final_norm_addvis
 #SBATCH --output="slurmout/9.5.additional_analysis-%j.out"
 #SBATCH --mail-user=Sirui.Weng@petermac.org

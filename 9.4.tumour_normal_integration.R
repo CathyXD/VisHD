@@ -187,12 +187,12 @@ p_all <- ggplot(spatial_df, aes(x_centroid, y_centroid, colour = cell_type)) +
 ggsave(file.path(png_dir, "9_spatial_all_samples.png"), p_all,
        width = 20, height = 10, dpi = 300, limitsize = FALSE)
 
-# ── 9. Module-group (G1/G2/G3 signature) visualisation ────────────────────────
+# ── 9. Module-group (CB+DT groupdeg signature) visualisation ──────────────────
 # Resolve the single "Tumour" bucket into its per-cell signature label using the
-# 6.2.3 binarisation output (metas$Module_group), and score the three groupdeg
-# signatures on the integrated object. Normals collapse to a single "Normal".
-metas    <- readRDS("~/VisHD/6.4.DT_signature_analysis/metas.Rds")
-groupdeg <- readRDS(paste0("~/VisHD/6.3.DT_archetype_module/",
+# 6.4 binarisation output (metas$Module_group), and score the merged CB+DT
+# groupdeg signatures on the integrated object. Normals collapse to "Normal".
+metas    <- readRDS("~/VisHD/6.4.merged_module_analysis/metas.Rds")
+groupdeg <- readRDS(paste0("~/VisHD/6.3.archetype_module_Jaccard/",
                            "group_DEG_enrichment/cross_sample_summary/groupdeg.rds"))
 
 # barcode key in the integrated object is slide_<cell>; metas carries slide + cell

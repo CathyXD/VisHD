@@ -73,8 +73,8 @@ meta_xlsx     <- "~/VisHD/public_signature/meta_programs_2025-01-29.xlsx"
 sheetname     <- excel_sheets(meta_xlsx)
 
 # groupgene: named list of the 3 curated tumour signatures (G1/G2/G3), each a
-# character vector of gene symbols (from 6.3.archetype_module.r)
-groupgene <- readRDS("~/VisHD/6.3.archetype_module/groupgene.Rds")
+# character vector of gene symbols (from 6.3.archetype_module_Jaccard.r)
+groupgene <- readRDS("~/VisHD/6.3.archetype_module_Jaccard/groupgene.Rds")
 
 # ── groupgene signature expression, aggregated across all samples ────────────
 # Per sample: average SpaNorm expression per signature gene within each

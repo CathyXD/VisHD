@@ -81,8 +81,8 @@ tumour/normal splits before processing.
 | `5.4.tumour_expression_proportion.R` | run-once | `tumour/tumour_srt.qs2` + 5.3 results | `5.4.expression_proportion/` |
 | `6.1.archetypal_analysis_tumour.ipynb` | per-sample (1-8, `SAMPLE_IDX`) | `tumour/tumour.h5ad` | `tumour/archetype_result/` |
 | `6.2.archetype_downstream.R` | run-once | per-sample `archetype_result/` | `6.2.archetype_downstream_tumour/` |
-| `6.3.archetype_module.r` | run-once | 6.2 downstream outputs | archetype/`groupdeg` module gene sets |
-| `6.4.signature_analysis.R` | run-once | `tumour/tumour_srt.qs2` + 6.3 groupdeg | `6.4.signature_analysis/` |
+| `6.3.archetype_module_Jaccard.r` | run-once | 6.2 downstream outputs | archetype/`groupdeg`+`groupgene` module gene sets (canonical `groupdeg.rds` at `6.3.archetype_module_Jaccard/group_DEG_enrichment/cross_sample_summary/groupdeg.rds`, merged in-place by `6.4.merged_module_analysis.R`) |
+| `6.4.merged_module_analysis.R` / `6.4.merged_module_aggregate.R` | per-sample (1-8) / run-once | `tumour/tumour_srt.qs2` + 6.3 groupdeg | `6.4.merged_module_analysis/` |
 | `6.5.integrate_tumour_archetype.ipynb` | run-once | `4.4.../integrated_tumour_anno.h5ad` | `6.5.integrate_tumour_archetype/` |
 | `6.6.archetype_visualisation.R` | run-once | `4.4.../integrated_pearson_srt.qs2` + 6.5 csv | `6.5.integrate_tumour_archetype/viz/` |
 | `7.1.normalcell_integration_pearson.r` | run-once | all 8 `normal/normal_srt.qs2` | `7.1.normal_cell_integration/integrated_pearson_srt2.qs2` (+`.h5ad`) |

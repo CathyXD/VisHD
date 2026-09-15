@@ -5,11 +5,11 @@
 # list keyed on the `final_annotation` cell identity.
 #
 #   * Kontextual  — context-aware CO-LOCALIZATION between tumour groups and
-#                   normal cell types. Tumour groups are the G1/G2/G3(+combos)
-#                   / Neg labels; the "normal" parent population is built
-#                   automatically from every non-tumour annotation.
+#                   normal cell types. Tumour groups are the groupdeg-derived
+#                   labels (+combos) / Neg labels; the "normal" parent
+#                   population is built automatically from every non-tumour annotation.
 #   * SpatioMark  — continuous expression (SpaNorm logcounts) of the tumour
-#                   group-DEG genes (groupdeg.rds: G1/G2/G3) *in tumour cells*
+#                   group-DEG genes (groupdeg.rds) *in tumour cells*
 #                   as a function of proximity to each normal cell type
 #                   (calcStateChanges over the distance to each normal type).
 #
@@ -57,9 +57,9 @@ spm_dir  <- file.path(out_dir, "spatiomark")
 for (d in c(kon_dir, spm_dir)) dir.create(d, recursive = TRUE, showWarnings = FALSE)
 
 # ── Reference: tumour group-DEG gene sets (G1/G2/G3) ──────────────────────────
-groupdeg <- readRDS(paste0("~/VisHD/6.3.DT_archetype_module/",
+groupdeg <- readRDS(paste0("~/VisHD/6.3.archetype_module_Jaccard/",
                            "group_DEG_enrichment/cross_sample_summary/groupdeg.rds"))
-gene2group <- stack(lapply(groupdeg, as.character))          # values, ind(=G1/G2/G3)
+gene2group <- stack(lapply(groupdeg, as.character))          # values, ind(=groupdeg group name)
 gene2group <- setNames(as.character(gene2group$ind), gene2group$values)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -243,7 +243,7 @@ stateChanges <- calcStateChanges(
   nCores   = nCores
 )
 
-# Annotate each marker with its G1/G2/G3 group of origin.
+# Annotate each marker with its groupdeg group of origin.
 mk_col <- intersect(c("marker", "feature"), colnames(stateChanges))[1]
 if (!is.na(mk_col)) stateChanges$group <- gene2group[stateChanges[[mk_col]]]
 

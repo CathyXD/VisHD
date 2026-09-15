@@ -31,9 +31,17 @@ src_dir <- "~/VisHD/10.3.tumour_border/per_sample_tables"
 paths   <- system("realpath ~/VisHD/LUT-245-*/", intern = TRUE)
 samples <- basename(paths)
 
-group_pal    <- c("Neg" = "lightgrey", "G1" = "red", "G2" = "gold", "G3" = "royalblue",
-                  "G2/G1" = "orange", "G3/G1" = "purple", "G3/G2" = "green",
-                  "G3/G2/G1" = "darkgrey")
+# module_anno colours derived generically from groupdeg names (mirrors
+# 9.1/9.2/9.3/10.2), covering Neg + every pure group + all combos.
+groupdeg_labs <- names(readRDS(paste0("~/VisHD/6.3.archetype_module_Jaccard/",
+                           "group_DEG_enrichment/cross_sample_summary/groupdeg.rds")))
+group_combos  <- unlist(lapply(seq_along(groupdeg_labs), function(k)
+  combn(groupdeg_labs, k, FUN = function(x) paste(x, collapse = "/"))))
+group_pal <- c(Neg = "lightgrey",
+               if (length(group_combos) > 0)
+                 setNames(grDevices::colorRampPalette(RColorBrewer::brewer.pal(8, "Set2"))(length(group_combos)),
+                          group_combos)
+               else character(0))
 
 
 read_one <- function(s) {

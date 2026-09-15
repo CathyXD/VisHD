@@ -63,11 +63,17 @@ make_pal <- function(levs) {
   setNames(cols[seq_len(n)], levs)
 }
 
-# ── Fill palettes reused verbatim from 9.1.per_sample_tumour_normal.R ─────────
-# module-group colours (module_anno fill).
-group_pal <- c("Neg" = "lightblue", "G1" = "red", "G2" = "gold", "G3" = "royalblue",
-               "G1/G2" = "orange", "G1/G3" = "purple", "G2/G3" = "green",
-               "G1/G2/G3" = "grey")
+# ── Fill palettes derived generically from groupdeg names (mirrors
+# 9.1.per_sample_tumour_normal.R) — module-group colours (module_anno fill).
+groupdeg_labs <- names(readRDS(paste0("~/VisHD/6.3.archetype_module_Jaccard/",
+                           "group_DEG_enrichment/cross_sample_summary/groupdeg.rds")))
+group_combos  <- unlist(lapply(seq_along(groupdeg_labs), function(k)
+  combn(groupdeg_labs, k, FUN = function(x) paste(x, collapse = "/"))))
+group_pal <- c(Neg = "lightblue",
+               if (length(group_combos) > 0)
+                 setNames(grDevices::colorRampPalette(RColorBrewer::brewer.pal(8, "Set2"))(length(group_combos)),
+                          group_combos)
+               else character(0))
 canon <- function(x) vapply(strsplit(x, "/"),
                             function(p) paste(sort(p), collapse = "/"), character(1))
 

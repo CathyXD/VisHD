@@ -54,11 +54,8 @@ meta_programs <- set_names(sheetname, sheetname) %>%
 meta_programs_unlist <- unlist(meta_programs, recursive = F)
 names(meta_programs_unlist) <- make.names(names(meta_programs_unlist), unique = T)
 
-# groupdeg.rds was never generated (6.3.DT_archetype_module.r's cross_sample_summary/
-# is empty) — skip the G1-G5 group-DEG scoring by using an empty signature list.
-# Every downstream consumer (ucell_score(), fp_save(), the A6 module_anno block)
-# already handles zero signatures gracefully.
-groupdeg <- list()
+groupdeg <- readRDS(paste0("~/VisHD/6.3.archetype_module_Jaccard/",
+                           "group_DEG_enrichment/cross_sample_summary/groupdeg.rds"))
 
 tumour_markers <- c("AR", "FOLH1", "KLK2", "KLK3", "KLK4", "TMPRSS2",
                     "NKX3-1", "HOXB13", "TRPM8")
@@ -87,7 +84,7 @@ for (d in c(spanorm_dir, pearson_dir, banksy_dir, spatial_dir, barplots_dir))
 
 # ── Palette helpers (needed in both load and processing paths) ─────────────────
 # Built generically from groupdeg names so the palette tracks whatever group
-# labels/count groupdeg.rds carries (currently DT_G1..DT_G5).
+# labels/count groupdeg.rds carries (currently DT-1..DT-5, CB-only).
 labs         <- names(groupdeg)
 group_combos <- unlist(lapply(seq_along(labs), function(k)
   combn(labs, k, FUN = function(x) paste(x, collapse = "/"))))
@@ -191,7 +188,7 @@ DefaultAssay(srt) <- "SpaNorm"
 res <- ucell_score(srt, clean_module, "_arch")
 srt <- res$srt; arch_mod_cols <- res$cols
 
-# 2. G1/G2/G3 group-DEG → gd_G1_UCell, gd_G2_UCell, gd_G3_UCell
+# 2. groupdeg group-DEG → gd_<group>_UCell (e.g. gd_DT-1_UCell, gd_CB-only_UCell)
 res <- ucell_score(srt, groupdeg, "_gd")
 srt <- res$srt; mod_score_cols <- res$cols
 
@@ -214,14 +211,36 @@ srt <- res$srt; meta_cols <- res$cols
 
 cat("Module scores added. Meta.data columns:", ncol(srt@meta.data), "\n")
 
-# ── A6. Module_group annotation — SKIPPED (6.4.DT_signature_analysis/metas.Rds
-# not available). All tumour cells get a neutral "Unscored" placeholder instead
-# of a Module_group label so downstream code (mg_pal, final_annotation, plots)
-# still runs unchanged.
+# ── A6. Module_group annotation ────────────────────────────────────────────────
+# Binarise each groupdeg UCell score (GMM threshold via binarise_expression(),
+# same approach as 6.4.merged_module_analysis.R) and combine the per-cell "pos"
+# calls into one combo label (e.g. "DT-1", "DT-1/DT-3", "Neg"). Normal cells get
+# "Normal"; tumour cells with no scorable groupdeg genes fall back to "Unscored".
 group_levels <- c("Neg", group_combos)
 is_tum <- srt$compartment == "Tumour"
-module_anno         <- rep("Normal", ncol(srt))
-module_anno[is_tum] <- "Unscored"
+
+if (length(mod_score_cols) > 0) {
+  bin_dir  <- file.path(path, "module_binarisation")
+  dir.create(bin_dir, recursive = TRUE, showWarnings = FALSE)
+  mod_labs <- sub("_gd_UCell$", "", mod_score_cols)
+  pos_cols <- character(0)
+  for (col in mod_score_cols) {
+    sc  <- setNames(srt@meta.data[[col]], colnames(srt))
+    bin <- binarise_expression(sc, verbose = TRUE,
+             plot_out = file.path(bin_dir, sprintf("%s_binarisation.png", col)))
+    pos_col <- paste0(col, "_pos")
+    srt@meta.data[[pos_col]] <- factor(ifelse(bin == 1L, "pos", "neg"), levels = c("neg", "pos"))
+    pos_cols <- c(pos_cols, pos_col)
+  }
+  pos_mat     <- do.call(cbind, lapply(pos_cols, function(m) srt@meta.data[[m]] == "pos"))
+  module_anno <- apply(pos_mat, 1, function(r) {
+    hit <- mod_labs[which(r)]
+    if (!length(hit)) "Neg" else paste(hit, collapse = "/")
+  })
+} else {
+  module_anno <- rep("Unscored", ncol(srt))
+}
+module_anno <- ifelse(is_tum, module_anno, "Normal")
 
 present <- levels(droplevels(factor(module_anno)))
 mg_pal  <- setNames(group_pal[canon(present)], present)

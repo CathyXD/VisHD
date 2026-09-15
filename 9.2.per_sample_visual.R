@@ -211,11 +211,18 @@ Imagescore_meta_programs <- function(obj, sheetname, meta_cols, out_dir) {
 # on "umap"/"pearsonumap" + tissue centroids, and the 6 archetype module
 # (_arch_UCell) scores as facet_grid(module ~ slide). Written at the end of
 # this script into agg_out_dir (point 4, "another folder").
-# module_anno palette reused verbatim from 9.3.aggreate_cell_composition_analysis.R
-# so colours match every other cross-sample module_anno figure.
-group_pal <- c("Neg" = "lightblue", "G1" = "red", "G2" = "gold", "G3" = "royalblue",
-               "G1/G2" = "orange", "G1/G3" = "purple", "G2/G3" = "green",
-               "G1/G2/G3" = "grey")
+# module_anno palette derived generically from groupdeg names (mirrors
+# 9.1.per_sample_tumour_normal.R) so colours match every other cross-sample
+# module_anno figure regardless of how many groupdeg groups/combos exist.
+groupdeg_labs <- names(readRDS(paste0("~/VisHD/6.3.archetype_module_Jaccard/",
+                           "group_DEG_enrichment/cross_sample_summary/groupdeg.rds")))
+group_combos  <- unlist(lapply(seq_along(groupdeg_labs), function(k)
+  combn(groupdeg_labs, k, FUN = function(x) paste(x, collapse = "/"))))
+group_pal <- c(Neg = "lightblue",
+               if (length(group_combos) > 0)
+                 setNames(colorRampPalette(brewer.pal(8, "Set2"))(length(group_combos)),
+                          group_combos)
+               else character(0))
 canon <- function(x) vapply(strsplit(x, "/"),
                             function(p) paste(sort(p), collapse = "/"), character(1))
 build_mg_pal <- function(levs) {

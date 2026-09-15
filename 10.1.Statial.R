@@ -56,7 +56,7 @@ kon_dir  <- file.path(out_dir, "kontextual")
 spm_dir  <- file.path(out_dir, "spatiomark")
 for (d in c(kon_dir, spm_dir)) dir.create(d, recursive = TRUE, showWarnings = FALSE)
 
-# ── Reference: tumour group-DEG gene sets (G1/G2/G3) ──────────────────────────
+# ── Reference: tumour group-DEG gene sets (groupdeg) ──────────────────────────
 groupdeg <- readRDS(paste0("~/VisHD/6.3.archetype_module_Jaccard/",
                            "group_DEG_enrichment/cross_sample_summary/groupdeg.rds"))
 gene2group <- stack(lapply(groupdeg, as.character))          # values, ind(=groupdeg group name)

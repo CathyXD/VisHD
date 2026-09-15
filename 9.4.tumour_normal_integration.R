@@ -262,7 +262,7 @@ DefaultAssay(srt) <- "Spatial"
 srt   <- NormalizeData(srt, verbose = FALSE)
 feats <- lapply(groupdeg, function(g) intersect(g, rownames(srt)))
 srt   <- AddModuleScore_UCell(srt, features = feats, name = "_GDmod")
-mod_cols <- paste0(names(groupdeg), "_GDmod")            # module_G1/G2/G3
+mod_cols <- paste0(names(groupdeg), "_GDmod")            # one per groupdeg group
 # FeaturePlot (UMAP) — steelblue/white/indianred gradient2 centred at 0
 p_feat <- FeaturePlot(srt, reduction = "pearsonbatchumap", features = mod_cols,
                       ncol = length(mod_cols), order = TRUE) &
@@ -286,7 +286,7 @@ for (m in mod_cols) {
 }
 
 srt <- AddModuleScore(srt, features = feats, name = "Module", assay = "Spatial")
-colnames(srt@meta.data)[grep("Module", colnames(srt@meta.data))] <- paste0("Module_", names(groupdeg))  # Module_G1/G2/G3
+colnames(srt@meta.data)[grep("Module", colnames(srt@meta.data))] <- paste0("Module_", names(groupdeg))  # one per groupdeg group
 mod_cols <- paste0("Module_", names(groupdeg)) 
 
 # FeaturePlot (UMAP) — steelblue/white/indianred gradient2 centred at 0

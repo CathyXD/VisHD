@@ -11,13 +11,13 @@
 #               any tumour cell. Tumour neighbours are collapsed to a single
 #               "Tumour" identity; normal neighbours keep their
 #               final_annotation cell-type name.
-#   Section 2 — same idea, but the reference population is each tumour
-#               module group in turn (G1 / G2 / G3, inclusive of combo
-#               labels e.g. "G1/G2"). The composition of ALL cells within r
+#   Section 2 — same idea, but the reference population is each groupdeg
+#               module group in turn (inclusive of combo labels e.g.
+#               "DT-1/DT-3"). The composition of ALL cells within r
 #               (including the focal group's own cells) is tabulated, with
 #               neighbours labelled by normal final_annotation cell type OR,
 #               for tumour cells, their exact module_anno value ("Neg",
-#               "G1", ..., "G1/G2/G3" — no collapsing).
+#               "DT-1", ..., every groupdeg combo — no collapsing).
 #
 # Both sections get the same per-cell visualization: for every cell in the
 # reference/self population, its own neighbour composition at each radius is
@@ -67,7 +67,8 @@ setwd("~/VisHD")
 UM_PER_PX     <- 0.29                      # same approximation as 10.1.Statial.R
 RADII_UM      <- c(10, 20, 30, 50, 100)
 RADII_PX      <- RADII_UM / UM_PER_PX
-MODULE_GROUPS <- c("G1", "G2", "G3")
+MODULE_GROUPS <- names(readRDS(paste0("~/VisHD/6.3.archetype_module_Jaccard/",
+                           "group_DEG_enrichment/cross_sample_summary/groupdeg.rds")))
 
 out_dir <- "~/VisHD/10.2.tumour_distance_cell_composition"
 s1_dir  <- file.path(out_dir, "section1_any_tumour")
@@ -78,14 +79,19 @@ for (d in c(s1_dir, s2_dir))
     dir.create(file.path(d, sd), recursive = TRUE, showWarnings = FALSE)
 
 # ── Palette helper ─────────────────────────────────────────────────────────
-# module_anno colours reused verbatim from 9.1/9.3, covering every value the
-# column can take (Neg, the 3 pure groups, and all combos).
-group_pal <- c("Neg" = "lightblue", "G1" = "red", "G2" = "gold", "G3" = "royalblue",
-              "G2/G1" = "orange", "G3/G1" = "purple", "G3/G2" = "green",
-              "G3/G2/G1" = "grey")
+# module_anno colours derived generically from groupdeg names (mirrors
+# 9.1/9.3), covering every value the column can take (Neg, every pure group,
+# and all combos), regardless of how many groupdeg groups exist.
+group_combos <- unlist(lapply(seq_along(MODULE_GROUPS), function(k)
+  combn(MODULE_GROUPS, k, FUN = function(x) paste(x, collapse = "/"))))
+group_pal <- c(Neg = "lightblue",
+               if (length(group_combos) > 0)
+                 setNames(grDevices::colorRampPalette(RColorBrewer::brewer.pal(8, "Set2"))(length(group_combos)),
+                          group_combos)
+               else character(0))
 
 # Normal cell-type names get a Set3 palette; anything named in `special_pal`
-# (e.g. Tumour=red, or G1/G2/G3/Other) keeps its fixed colour instead.
+# (e.g. Tumour=red, or a groupdeg group/combo) keeps its fixed colour instead.
 build_composition_pal <- function(levs, special_pal) {
   levs <- unique(as.character(levs))
   oth  <- setdiff(levs, names(special_pal))
